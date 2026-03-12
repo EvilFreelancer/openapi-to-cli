@@ -9,7 +9,7 @@ Unlike [openapi-to-mcp](https://github.com/EvilFreelancer/openapi-to-mcp), which
 
 ### High level idea
 
-- The user installs the package (via `npx` or as an npm dependency) and gets the `ocli` binary in `$PATH`.
+- The user installs the package (for example via `npx` or globally) and gets the `ocli` binary in `$PATH`.
 - On first use the user onboards an API with a command like:
 
 ```bash
@@ -40,6 +40,42 @@ or using the default profile:
 
 ```bash
 ocli use myapi
+ocli messages --limit 10
+```
+
+### Installation and usage via npm and npx
+
+To use `ocli` locally without installing it globally you can rely on `npx`:
+
+```bash
+npx openapi-to-cli onboard \
+  --api-base-url http://127.0.0.1:2222 \
+  --openapi-spec http://127.0.0.1:2222/openapi.json
+```
+
+The command above will
+
+- download the `openapi-to-cli` package from npm if it is not cached yet
+- run the `ocli` binary from the package
+- create the `default` profile and cache the OpenAPI spec under `.ocli/specs/default.json`
+
+After onboarding you can continue to use the generated commands with the `ocli` binary that `npx` runs for you:
+
+```bash
+npx openapi-to-cli use myapi
+npx openapi-to-cli messages --limit 10
+```
+
+If you prefer a global installation you can also install the package once
+
+```bash
+npm install -g openapi-to-cli
+```
+
+and then call the binary directly
+
+```bash
+ocli onboard --api-base-url http://127.0.0.1:2222 --openapi-spec http://127.0.0.1:2222/openapi.json
 ocli messages --limit 10
 ```
 
