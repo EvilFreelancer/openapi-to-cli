@@ -22,14 +22,17 @@ describe("OpenapiToCommands", () => {
         "/messages": {
           get: {
             operationId: "listMessages",
+            summary: "List messages",
           },
           post: {
             operationId: "createMessage",
+            description: "Create a message",
           },
         },
         "/channels/{username}": {
           get: {
             operationId: "getChannelByUsername",
+            summary: "Get channel by username",
           },
         },
       },
@@ -45,6 +48,15 @@ describe("OpenapiToCommands", () => {
 
     const names = commands.map((c: CliCommand) => c.name).sort();
     expect(names).toEqual(["channels_username", "messages_get", "messages_post"]);
+
+    const byName: Record<string, CliCommand> = {};
+    for (const cmd of commands) {
+      byName[cmd.name] = cmd;
+    }
+
+    expect(byName.messages_get.description).toBe("List messages");
+    expect(byName.messages_post.description).toBe("Create a message");
+    expect(byName.channels_username.description).toBe("Get channel by username");
   });
 
   it("honors include and exclude endpoint filters", () => {

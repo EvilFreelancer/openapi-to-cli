@@ -14,6 +14,7 @@ export interface CliCommand {
   method: string;
   path: string;
   options: CliCommandOption[];
+  description?: string;
 }
 
 type HttpMethod = "get" | "post" | "put" | "delete" | "patch" | "head" | "options";
@@ -25,6 +26,8 @@ interface PathOperation {
   path: string;
   method: HttpMethod;
   operation: {
+    summary?: string;
+    description?: string;
     parameters?: Array<{
       name: string;
       in: string;
@@ -108,12 +111,14 @@ export class OpenapiToCommands {
       for (const op of ops) {
         const name = multipleMethods ? `${baseName}_${op.method}` : baseName;
         const options = this.extractOptions(op);
+        const description = op.operation.summary ?? op.operation.description;
 
         commands.push({
           name,
           method: op.method,
           path: op.path,
           options,
+          description,
         });
       }
     }

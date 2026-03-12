@@ -254,4 +254,60 @@ describe("cli", () => {
     expect(out).toContain("http://example.com");
     expect(out).toContain("p");
   });
+
+  it("commands lists available commands for the current profile", async () => {
+    const localDir = `${cwd}/.oclirc`;
+    const profilesPath = `${localDir}/profiles.ini`;
+    const specPath = "/project/spec.json";
+    const cachePath = `${localDir}/specs/search-api.json`;
+
+    const spec = {
+      openapi: "3.0.0",
+      paths: {
+        "/api/v1/search/": {
+          get: {
+            summary: "Search in content index",
+            parameters: [
+              {
+                name: "q",
+                in: "query",
+                required: true,
+                schema: {
+                  type: "string",
+                },
+              },
+            ],
+          },
+        },
+      },
+    };
+
+    const iniContent = [
+      "[search-api]",
+      "api_base_url = https://search.vamplabai.com",
+      `openapi_spec_source = ${specPath}`,
+      `openapi_spec_cache = ${cachePath}`,
+      "include_endpoints = get:/api/v1/search/",
+      "exclude_endpoints = ",
+      "",
+    ].join("\n");
+
+    const log: string[] = [];
+    const { profileStore, openapiLoader } = createCliDeps(cwd, homeDir, {
+      [profilesPath]: iniContent,
+      [`${localDir}/current`]: "search-api",
+      [specPath]: JSON.stringify(spec),
+    });
+
+    await run(["commands"], {
+      cwd,
+      profileStore,
+      openapiLoader,
+      stdout: (msg: string) => log.push(msg),
+    });
+
+    const out = log.join("");
+    expect(out).toContain("Available commands for profile search-api");
+    expect(out).toContain("api_v1_search  Search in content index");
+  });
 });

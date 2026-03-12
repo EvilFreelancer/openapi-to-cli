@@ -6,6 +6,7 @@ import yargs from "yargs";
 import { ConfigLocator } from "./config";
 import { ProfileStore, Profile } from "./profile-store";
 import { OpenapiLoader } from "./openapi-loader";
+import { OpenapiToCommands } from "./openapi-to-commands";
 
 export interface RunOptions {
   cwd?: string;
@@ -34,6 +35,7 @@ export async function run(argv: string[], options?: RunOptions): Promise<void> {
   const profileStore = options?.profileStore ?? new ProfileStore({ locator: configLocator });
   const openapiLoader = options?.openapiLoader ?? new OpenapiLoader();
   const stdout = options?.stdout ?? defaultStdout;
+  const openapiToCommands = new OpenapiToCommands();
 
   const runAddProfile = async (profileName: string, args: AddProfileArgs): Promise<void> => {
     const configPaths = configLocator.resolveConfig(cwd);
@@ -135,6 +137,34 @@ export async function run(argv: string[], options?: RunOptions): Promise<void> {
         profileStore.setCurrentProfile(cwd, args.profile as string);
       }
     )
+    .command(
+      "commands",
+      "List available commands for the current profile",
+      (y) => y.version(false),
+      async () => {
+        const profile = profileStore.getCurrentProfile(cwd);
+        if (!profile) {
+          throw new Error("No current profile configured");
+        }
+        const spec = await openapiLoader.loadSpec(profile);
+        const commands = openapiToCommands.buildCommands(spec, profile);
+        if (commands.length === 0) {
+          stdout(`No commands available for profile ${profile.name}\n`);
+          return;
+        }
+
+        stdout(`Available commands for profile ${profile.name}:\n\n`);
+
+        const maxNameLength = commands.reduce((max, cmd) => (cmd.name.length > max ? cmd.name.length : max), 0);
+        const padding = maxNameLength + 2;
+
+        commands.forEach((cmd) => {
+          const description = cmd.description ?? "";
+          const namePadded = cmd.name.padEnd(padding, " ");
+          stdout(`  ${namePadded}${description}\n`);
+        });
+      }
+    )
     .demandCommand(1, "")
     .help("help")
     .alias("h", "help")
@@ -148,4 +178,6 @@ function main(): void {
   });
 }
 
-main();
+if (require.main === module) {
+  main();
+}
