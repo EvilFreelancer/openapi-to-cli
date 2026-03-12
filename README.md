@@ -5,7 +5,7 @@
 - **Input**: OpenAPI/Swagger spec (URL or file) plus API connection settings.
 - **Output**: an executable `ocli` binary where each API operation is exposed as a dedicated subcommand.
 
-Unlike `openapi-to-mcp`, which starts an MCP server with tools, `ocli` provides a direct command line interface.
+Unlike [openapi-to-mcp](https://github.com/EvilFreelancer/openapi-to-mcp), which starts an MCP server with tools, `ocli` provides a direct command line interface.
 
 ### High level idea
 
@@ -119,7 +119,7 @@ where:
   - query and path parameters → `--param-name`;
   - JSON body fields → also `--field-name`.
 
-Option types and required flags are determined from the OpenAPI schema (similar to how `openapi-to-mcp` uses Zod).
+Option types and required flags are determined from the OpenAPI schema.
 
 ### CLI commands and help
 

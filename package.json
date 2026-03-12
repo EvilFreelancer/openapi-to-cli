@@ -9,6 +9,7 @@
   "main": "dist/cli.js",
   "scripts": {
     "build": "tsc",
+    "watch": "tsc -w",
     "start": "node dist/cli.js",
     "test": "jest"
   },

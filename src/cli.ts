@@ -74,7 +74,7 @@ export async function run(argv: string[], options?: RunOptions): Promise<void> {
     .command(
       "onboard",
       "Add a new profile (alias for profiles add default)",
-      (y) => addProfileOptions(y),
+      (y) => addProfileOptions(y.version(false)),
       async (args) => {
         await runAddProfile("default", args as AddProfileArgs);
       }
@@ -84,6 +84,8 @@ export async function run(argv: string[], options?: RunOptions): Promise<void> {
       "Profile management",
       (y) =>
         y
+          .version(false)
+          .demandCommand(1, "")
           .command(
             "add <profile>",
             "Add a new profile and cache OpenAPI spec",
@@ -128,11 +130,14 @@ export async function run(argv: string[], options?: RunOptions): Promise<void> {
     .command(
       "use <profile>",
       "Set default profile",
-      (y) => y.positional("profile", { type: "string", demandOption: true }),
+      (y) => y.version(false).positional("profile", { type: "string", demandOption: true }),
       (args) => {
         profileStore.setCurrentProfile(cwd, args.profile as string);
       }
     )
+    .demandCommand(1, "")
+    .help("help")
+    .alias("h", "help")
     .parseAsync();
 }
 
