@@ -1,0 +1,66 @@
+name: Tag release on merge
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - main
+  workflow_dispatch:
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  tag-version:
+    name: Bump and push version tag
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
+    permissions:
+      contents: write
+      actions: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.ref || github.event.pull_request.merge_commit_sha }}
+
+      - name: Fetch all tags
+        run: git fetch --tags
+
+      - name: Check if commit already has a tag
+        id: check
+        run: |
+          if [ -n "$(git tag --points-at HEAD)" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Commit already has a tag, skipping."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Get latest SemVer tag and bump patch
+        id: version
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          set -e
+          LATEST=$(git tag -l 'v*' | sort -V | tail -1 || true)
+          if [ -z "$LATEST" ]; then
+            LATEST="v0.1.0"
+          fi
+          VERSION="${LATEST#v}"
+          NEW_VERSION=$(echo "$VERSION" | awk -F. '{$3=$3+1; OFS="."; print $1,$2,$3}')
+          echo "previous=$LATEST" >> "$GITHUB_OUTPUT"
+          echo "version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v${NEW_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Bumping $LATEST -> v${NEW_VERSION}"
+
+      - name: Create and push tag
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          TAG="${{ steps.version.outputs.tag }}"
+          git tag -a "$TAG" -m "Release $TAG (auto-tag on merge)"
+          git push origin "$TAG"
