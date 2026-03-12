@@ -329,6 +329,72 @@ describe("cli", () => {
     expect(out).toContain("api_v1_search  Search in content index");
   });
 
+  it("commands add method suffix when spec path has multiple methods even if only one is included", async () => {
+    const localDir = `${cwd}/.ocli`;
+    const profilesPath = `${localDir}/profiles.ini`;
+    const specPath = "/project/spec.json";
+    const cachePath = `${localDir}/specs/messages-api.json`;
+
+    const spec = {
+      openapi: "3.0.0",
+      paths: {
+        "/messages": {
+          get: {
+            summary: "List messages",
+          },
+          post: {
+            summary: "Create message",
+          },
+        },
+        "/status": {
+          get: {
+            summary: "Get status",
+          },
+        },
+        "/users": {
+          get: {
+            summary: "List users",
+          },
+        },
+      },
+    };
+
+    const iniContent = [
+      "[messages-api]",
+      "api_base_url = https://api.example.com",
+      "api_basic_auth = ",
+      "api_bearer_token = ",
+      `openapi_spec_source = ${specPath}`,
+      `openapi_spec_cache = ${cachePath}`,
+      "include_endpoints = get:/messages,get:/status,get:/users",
+      "exclude_endpoints = ",
+      "",
+    ].join("\n");
+
+    const log: string[] = [];
+    const { profileStore, openapiLoader } = createCliDeps(cwd, homeDir, {
+      [profilesPath]: iniContent,
+      [`${localDir}/current`]: "messages-api",
+      [specPath]: JSON.stringify(spec),
+    });
+
+    await run(["commands"], {
+      cwd,
+      profileStore,
+      openapiLoader,
+      stdout: (msg: string) => log.push(msg),
+    });
+
+    const out = log.join("");
+    expect(out).toContain("Available commands for profile messages-api");
+    expect(out).toContain("messages_get");
+    expect(out).toContain("List messages");
+    expect(out).toContain("status");
+    expect(out).toContain("Get status");
+    expect(out).toContain("users");
+    expect(out).toContain("List users");
+  });
+
   it("invokes API command with query parameters using current profile", async () => {
     const localDir = `${cwd}/.ocli`;
     const profilesPath = `${localDir}/profiles.ini`;

@@ -82,7 +82,7 @@ describe("OpenapiToCommands", () => {
     const commands: CliCommand[] = openapiToCommands.buildCommands(spec, profile);
 
     const names = commands.map((c: CliCommand) => c.name).sort();
-    expect(names).toEqual(["messages"]);
+    expect(names).toEqual(["messages_get"]);
   });
 
   it("extracts simple path and query parameters into command options", () => {

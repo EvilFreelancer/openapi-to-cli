@@ -44,8 +44,17 @@ interface PathOperation {
 export class OpenapiToCommands {
   buildCommands(spec: OpenapiSpecLike, profile: Profile): CliCommand[] {
     const operations = this.collectOperations(spec);
+    const methodsByPath: Record<string, Set<HttpMethod>> = {};
+
+    for (const op of operations) {
+      if (!methodsByPath[op.path]) {
+        methodsByPath[op.path] = new Set<HttpMethod>();
+      }
+      methodsByPath[op.path].add(op.method);
+    }
+
     const filtered = this.applyFilters(operations, profile);
-    return this.toCliCommands(filtered);
+    return this.toCliCommands(filtered, methodsByPath);
   }
 
   private collectOperations(spec: OpenapiSpecLike): PathOperation[] {
@@ -93,7 +102,7 @@ export class OpenapiToCommands {
     });
   }
 
-  private toCliCommands(operations: PathOperation[]): CliCommand[] {
+  private toCliCommands(operations: PathOperation[], methodsByPath: Record<string, Set<HttpMethod>>): CliCommand[] {
     const byPath: Record<string, PathOperation[]> = {};
 
     for (const op of operations) {
@@ -108,7 +117,8 @@ export class OpenapiToCommands {
     for (const pathKey of Object.keys(byPath)) {
       const ops = byPath[pathKey];
       const baseName = this.commandBaseNameFromPath(pathKey);
-      const multipleMethods = ops.length > 1;
+      const allMethodsForPath = methodsByPath[pathKey];
+      const multipleMethods = allMethodsForPath ? allMethodsForPath.size > 1 : ops.length > 1;
 
       for (const op of ops) {
         const name = multipleMethods ? `${baseName}_${op.method}` : baseName;

@@ -32,7 +32,7 @@ Alternatively, `ocli onboard` (with the same options, no profile name) creates a
 After onboarding, commands can be used like:
 
 ```bash
-ocli messages --profile myapi --limit 10
+ocli messages_get --profile myapi --limit 10
 ocli channels_username_get --profile myapi --username alice
 ```
 
@@ -63,7 +63,7 @@ After onboarding you can continue to use the generated commands with the `ocli` 
 
 ```bash
 npx openapi-to-cli use myapi
-npx openapi-to-cli messages --limit 10
+npx openapi-to-cli messages_get --limit 10
 ```
 
 If you prefer a global installation you can also install the package once
@@ -76,7 +76,7 @@ and then call the binary directly
 
 ```bash
 ocli onboard --api-base-url http://127.0.0.1:2222 --openapi-spec http://127.0.0.1:2222/openapi.json
-ocli messages --limit 10
+ocli messages_get --limit 10
 ```
 
 ### Profiles and configuration files
@@ -211,5 +211,5 @@ The project is intended to be published as an npm package so it can be invoked a
 
 ```bash
 npx openapi-to-cli onboard ...
-ocli messages --profile myapi ...
+ocli messages_get --profile myapi ...
 ```
