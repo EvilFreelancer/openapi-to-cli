@@ -53,4 +53,13 @@ jobs:
             TAG_REF="${{ github.event.inputs.tag || '' }}"
             echo "Manual publish for tag $TAG_REF (if empty, uses current ref)"
           fi
+
+          if [ -n "$TAG_REF" ]; then
+            VERSION_FROM_TAG="${TAG_REF#v}"
+            echo "Setting package.json version to $VERSION_FROM_TAG based on tag $TAG_REF"
+            npm version "$VERSION_FROM_TAG" --no-git-tag-version
+          else
+            echo "TAG_REF is empty, skipping package.json version update"
+          fi
+
           npm publish --provenance --access public
