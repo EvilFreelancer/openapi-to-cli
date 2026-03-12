@@ -14,6 +14,10 @@
     "start": "node dist/cli.js",
     "test": "jest"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/EvilFreelancer/openapi-to-cli"
+  },
   "keywords": [
     "openapi",
     "swagger",
