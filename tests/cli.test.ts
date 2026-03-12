@@ -2,6 +2,7 @@ import { ConfigLocator } from "../src/config";
 import { ProfileStore } from "../src/profile-store";
 import { OpenapiLoader } from "../src/openapi-loader";
 import { run, HttpClient } from "../src/cli";
+import { VERSION } from "../src/version";
 
 interface MemoryFsEntry {
   type: "file" | "dir";
@@ -97,7 +98,7 @@ describe("cli", () => {
     const out = logSpy.mock.calls.map((call) => String(call[0])).join("");
     logSpy.mockRestore();
 
-    expect(out).toContain("0.0.0-dev");
+    expect(out).toContain(VERSION);
   });
 
   it("onboard creates profile default and caches spec (alias for profiles add default)", async () => {
