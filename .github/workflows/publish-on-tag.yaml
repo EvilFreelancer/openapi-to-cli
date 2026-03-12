@@ -53,4 +53,4 @@ jobs:
             TAG_REF="${{ github.event.inputs.tag || '' }}"
             echo "Manual publish for tag $TAG_REF (if empty, uses current ref)"
           fi
-          npm publish --access public
+          npm publish --provenance --access public
