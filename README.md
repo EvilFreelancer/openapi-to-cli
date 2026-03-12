@@ -47,9 +47,9 @@ ocli messages --limit 10
 
 - A profile describes a single API connection.
 - Profiles are stored in an INI file (one section per profile, no special "current" key in the INI):
-  - global: `~/.oclirc/profiles.ini`
-  - project-local: `./.oclirc/profiles.ini` (has higher priority than global)
-- The profile to use when the user does not pass `--profile` is stored in `.oclirc/current` (one line: profile name). If the file is missing or empty, the profile named `default` is used. The profile named `default` is a normal profile like any other; it is just used when no profile is specified.
+  - global: `~/.ocli/profiles.ini`
+  - project-local: `./.ocli/profiles.ini` (has higher priority than global)
+- The profile to use when the user does not pass `--profile` is stored in `.ocli/current` (one line: profile name). If the file is missing or empty, the profile named `default` is used. The profile named `default` is a normal profile like any other; it is just used when no profile is specified.
 
 Example `profiles.ini` structure:
 
@@ -59,7 +59,7 @@ api_base_url = http://127.0.0.1:1111
 api_basic_auth =
 api_bearer_token = MY_TOKEN
 openapi_spec_source = http://127.0.0.1:1111/openapi.json
-openapi_spec_cache = /home/user/.oclirc/specs/default.json
+openapi_spec_cache = /home/user/.ocli/specs/default.json
 include_endpoints = get:/messages,get:/channels
 exclude_endpoints = 
 
@@ -68,20 +68,20 @@ api_base_url = http://127.0.0.1:2222
 api_basic_auth =
 api_bearer_token = MY_TOKEN
 openapi_spec_source = http://127.0.0.1:2222/openapi.json
-openapi_spec_cache = /home/user/.oclirc/specs/myapi.json
+openapi_spec_cache = /home/user/.ocli/specs/myapi.json
 include_endpoints = get:/messages,get:/channels
 exclude_endpoints = 
 ```
 
-The local file `./.oclirc/profiles.ini`, if present, fully overrides the global one when resolving profiles.
+The local file `./.ocli/profiles.ini`, if present, fully overrides the global one when resolving profiles.
 
 ### OpenAPI/Swagger caching
 
 - Config and cache directory:
-  - globally: `~/.oclirc/`
-  - locally: `./.oclirc/` relative to the directory where `ocli` is executed.
+  - globally: `~/.ocli/`
+  - locally: `./.ocli/` relative to the directory where `ocli` is executed.
 
-- Inside `.oclirc` the CLI creates:
+- Inside `.ocli` the CLI creates:
   - `profiles.ini` - profile configuration (one section per profile);
   - `current` - one line with the profile name to use when `--profile` is not passed (optional; if missing, profile `default` is used);
   - `specs/` - directory with cached specs:
@@ -138,7 +138,7 @@ The `ocli` binary provides the following core commands:
 - `ocli profiles list` - list all profiles;
 - `ocli profiles show <profile>` - show profile details;
 - `ocli profiles remove <profile>` - remove a profile;
-- `ocli use <profile>` - set the profile to use when `--profile` is not passed (writes profile name to `.oclirc/current`).
+- `ocli use <profile>` - set the profile to use when `--profile` is not passed (writes profile name to `.ocli/current`).
 - `ocli commands` - list available commands generated from the current profile and its OpenAPI spec.
 
 Help:
@@ -152,9 +152,9 @@ Help:
 
 The `openapi-to-cli` project mirrors parts of the `openapi-to-mcp` architecture but implements a CLI instead of an MCP server:
 
-- `config` - reads profile configuration and cache paths (INI files, global and local `.oclirc` lookup).
+- `config` - reads profile configuration and cache paths (INI files, global and local `.ocli` lookup).
 - `profile-store` - works with `profiles.ini` (read, write, select profile, current profile).
-- `openapi-loader` - loads and caches the OpenAPI spec (URL or file) into `.oclirc/specs/`.
+- `openapi-loader` - loads and caches the OpenAPI spec (URL or file) into `.ocli/specs/`.
 - `openapi-to-commands` - parses OpenAPI, applies include/exclude filters, generates command names and option schemas (based on `openapi-to-mcp/openapi-to-tools.ts` ideas).
 - `cli` - entry point, argument parser, command registration, help output.
 

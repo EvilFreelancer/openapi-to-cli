@@ -1,7 +1,7 @@
 import { ConfigLocator } from "../src/config";
 import { ProfileStore } from "../src/profile-store";
 import { OpenapiLoader } from "../src/openapi-loader";
-import { run } from "../src/cli";
+import { run, HttpClient } from "../src/cli";
 
 interface MemoryFsEntry {
   type: "file" | "dir";
@@ -84,7 +84,7 @@ describe("cli", () => {
   const cwd = "/project";
 
   it("onboard creates profile default and caches spec (alias for profiles add default)", async () => {
-    const localDir = `${cwd}/.oclirc`;
+    const localDir = `${cwd}/.ocli`;
     const profilesPath = `${localDir}/profiles.ini`;
     const spec = { openapi: "3.0.0", paths: {} };
 
@@ -114,7 +114,7 @@ describe("cli", () => {
   });
 
   it("profiles add <name> creates profile and caches spec", async () => {
-    const localDir = `${cwd}/.oclirc`;
+    const localDir = `${cwd}/.ocli`;
     const profilesPath = `${localDir}/profiles.ini`;
     const spec = { openapi: "3.0.0", paths: {} };
 
@@ -146,7 +146,7 @@ describe("cli", () => {
   });
 
   it("profiles list prints profile names", async () => {
-    const localDir = `${cwd}/.oclirc`;
+    const localDir = `${cwd}/.ocli`;
     const iniContent = [
       "[default]",
       "current_profile = a",
@@ -179,7 +179,7 @@ describe("cli", () => {
   });
 
   it("use sets current profile", async () => {
-    const localDir = `${cwd}/.oclirc`;
+    const localDir = `${cwd}/.ocli`;
     const profilesPath = `${localDir}/profiles.ini`;
     const iniContent = [
       "[default]",
@@ -205,7 +205,7 @@ describe("cli", () => {
   });
 
   it("profiles remove deletes profile", async () => {
-    const localDir = `${cwd}/.oclirc`;
+    const localDir = `${cwd}/.ocli`;
     const profilesPath = `${localDir}/profiles.ini`;
     const iniContent = [
       "[x]",
@@ -226,7 +226,7 @@ describe("cli", () => {
   });
 
   it("profiles show prints profile details", async () => {
-    const localDir = `${cwd}/.oclirc`;
+    const localDir = `${cwd}/.ocli`;
     const iniContent = [
       "[default]",
       "current_profile = p",
@@ -256,7 +256,7 @@ describe("cli", () => {
   });
 
   it("commands lists available commands for the current profile", async () => {
-    const localDir = `${cwd}/.oclirc`;
+    const localDir = `${cwd}/.ocli`;
     const profilesPath = `${localDir}/profiles.ini`;
     const specPath = "/project/spec.json";
     const cachePath = `${localDir}/specs/search-api.json`;
@@ -309,5 +309,80 @@ describe("cli", () => {
     const out = log.join("");
     expect(out).toContain("Available commands for profile search-api");
     expect(out).toContain("api_v1_search  Search in content index");
+  });
+
+  it("invokes API command with query parameters using current profile", async () => {
+    const localDir = `${cwd}/.ocli`;
+    const profilesPath = `${localDir}/profiles.ini`;
+    const cachePath = `${localDir}/specs/search-api.json`;
+
+    const spec = {
+      openapi: "3.0.0",
+      paths: {
+        "/api/v1/search/": {
+          get: {
+            summary: "Search in content index",
+            parameters: [
+              {
+                name: "q",
+                in: "query",
+                required: true,
+                schema: { type: "string" },
+              },
+            ],
+          },
+        },
+      },
+    };
+
+    const iniContent = [
+      "[search-api]",
+      "api_base_url = https://search.example.com",
+      "api_basic_auth = ",
+      "api_bearer_token = ",
+      "openapi_spec_source = /project/spec.json",
+      `openapi_spec_cache = ${cachePath}`,
+      "include_endpoints = get:/api/v1/search/",
+      "exclude_endpoints = ",
+      "",
+    ].join("\n");
+
+    const capturedConfigs: unknown[] = [];
+    const fakeHttpClient: HttpClient = {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      request: async (config: any) => {
+        capturedConfigs.push(config);
+        return {
+          status: 200,
+          statusText: "OK",
+          headers: {},
+          config,
+          data: { ok: true },
+        };
+      },
+    };
+
+    const log: string[] = [];
+    const { profileStore, openapiLoader } = createCliDeps(cwd, homeDir, {
+      [profilesPath]: iniContent,
+      [cachePath]: JSON.stringify(spec),
+      [`${localDir}/current`]: "search-api",
+    });
+
+    await run(["api_v1_search", "--q", "test"], {
+      cwd,
+      profileStore,
+      openapiLoader,
+      httpClient: fakeHttpClient,
+      stdout: (msg: string) => log.push(msg),
+    });
+
+    expect(capturedConfigs).toHaveLength(1);
+    const config = capturedConfigs[0] as { url: string; method: string };
+    expect(config.method).toBe("GET");
+    expect(config.url).toBe("https://search.example.com/api/v1/search/?q=test");
+
+    const out = log.join("");
+    expect(out).toContain('"ok": true');
   });
 });

@@ -85,7 +85,7 @@ describe("ProfileStore", () => {
 
   it("loads current profile from local profiles.ini and parses its fields", () => {
     const cwd = "/project";
-    const localDir = `${cwd}/.oclirc`;
+    const localDir = `${cwd}/.ocli`;
     const profilesPath = `${localDir}/profiles.ini`;
 
     const iniContent = [
@@ -94,7 +94,7 @@ describe("ProfileStore", () => {
       "api_basic_auth = ",
       "api_bearer_token = TOKEN",
       "openapi_spec_source = http://127.0.0.1:3000/openapi.json",
-      "openapi_spec_cache = /home/user/.oclirc/specs/myapi.json",
+      "openapi_spec_cache = /home/user/.ocli/specs/myapi.json",
       "include_endpoints = get:/messages,get:/channels",
       "exclude_endpoints = post:/admin/secret",
       "",
@@ -119,8 +119,8 @@ describe("ProfileStore", () => {
 
   it("prefers local profiles.ini over global when both exist", () => {
     const cwd = "/project";
-    const localDir = `${cwd}/.oclirc`;
-    const globalDir = `${homeDir}/.oclirc`;
+    const localDir = `${cwd}/.ocli`;
+    const globalDir = `${homeDir}/.ocli`;
 
     const localIni = ["[localapi]", "api_base_url = http://local", ""].join("\n");
     const globalIni = ["[globalapi]", "api_base_url = http://global", ""].join("\n");
@@ -138,7 +138,7 @@ describe("ProfileStore", () => {
 
   it("saves a new profile and makes it current when requested", () => {
     const cwd = "/project";
-    const localDir = `${cwd}/.oclirc`;
+    const localDir = `${cwd}/.ocli`;
     const profilesPath = `${localDir}/profiles.ini`;
 
     const { store, fs } = createStoreWithFs(cwd, homeDir, {});
@@ -149,7 +149,7 @@ describe("ProfileStore", () => {
       apiBasicAuth: "",
       apiBearerToken: "X",
       openapiSpecSource: "http://example.com/openapi.json",
-      openapiSpecCache: "/home/user/.oclirc/specs/savedapi.json",
+      openapiSpecCache: "/home/user/.ocli/specs/savedapi.json",
       includeEndpoints: ["get:/messages"],
       excludeEndpoints: [],
     };
@@ -168,7 +168,7 @@ describe("ProfileStore", () => {
 
   it("listProfileNames returns all profile section names", () => {
     const cwd = "/project";
-    const localDir = `${cwd}/.oclirc`;
+    const localDir = `${cwd}/.ocli`;
     const iniContent = [
       "[default]",
       "api_base_url = http://default",
@@ -191,7 +191,7 @@ describe("ProfileStore", () => {
 
   it("removeProfile deletes profile section and sets current to default if it was current", () => {
     const cwd = "/project";
-    const localDir = `${cwd}/.oclirc`;
+    const localDir = `${cwd}/.ocli`;
     const profilesPath = `${localDir}/profiles.ini`;
     const iniContent = [
       "[myapi]",
@@ -213,9 +213,9 @@ describe("ProfileStore", () => {
     expect(store.getCurrentProfileName(cwd)).toBe("default");
   });
 
-  it("setCurrentProfile writes current profile name to .oclirc/current", () => {
+  it("setCurrentProfile writes current profile name to .ocli/current", () => {
     const cwd = "/project";
-    const localDir = `${cwd}/.oclirc`;
+    const localDir = `${cwd}/.ocli`;
     const iniContent = [
       "[a]",
       "api_base_url = http://a",

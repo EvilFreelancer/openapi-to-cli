@@ -81,7 +81,7 @@ describe("OpenapiLoader", () => {
     apiBasicAuth: "",
     apiBearerToken: "",
     openapiSpecSource: "",
-    openapiSpecCache: "/home/user/.oclirc/specs/myapi.json",
+    openapiSpecCache: "/home/user/.ocli/specs/myapi.json",
     includeEndpoints: [],
     excludeEndpoints: [],
   };

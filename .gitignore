@@ -9,3 +9,4 @@ coverage/
 package-lock.json
 tests/**/*.js
 tests/**/*.d.ts
+.ocli/

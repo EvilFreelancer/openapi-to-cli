@@ -7,6 +7,7 @@ export interface CliCommandOption {
   location: ParameterLocation;
   required: boolean;
   schemaType?: string;
+  description?: string;
 }
 
 export interface CliCommand {
@@ -35,6 +36,7 @@ interface PathOperation {
       schema?: {
         type?: string;
       };
+      description?: string;
     }>;
   };
 }
@@ -140,6 +142,7 @@ export class OpenapiToCommands {
         location: param.in,
         required: Boolean(param.required),
         schemaType: param.schema?.type,
+        description: param.description,
       });
     }
 

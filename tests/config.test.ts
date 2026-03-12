@@ -22,10 +22,10 @@ function createLocator(fsMap: Record<string, boolean>, homeDir: string, cwd: str
 describe("ConfigLocator", () => {
   const homeDir = "/home/user";
 
-  it("prefers local .oclirc when profiles.ini exists locally", () => {
+  it("prefers local .ocli when profiles.ini exists locally", () => {
     const cwd = "/project";
-    const localConfigDir = `${cwd}/.oclirc`;
-    const globalConfigDir = `${homeDir}/.oclirc`;
+    const localConfigDir = `${cwd}/.ocli`;
+    const globalConfigDir = `${homeDir}/.ocli`;
 
     const fsMap: Record<string, boolean> = {
       [`${localConfigDir}/profiles.ini`]: true,
@@ -41,10 +41,10 @@ describe("ConfigLocator", () => {
     expect(paths.specsDir).toBe(`${localConfigDir}/specs`);
   });
 
-  it("falls back to global .oclirc when local profiles.ini is missing", () => {
+  it("falls back to global .ocli when local profiles.ini is missing", () => {
     const cwd = "/project";
-    const localConfigDir = `${cwd}/.oclirc`;
-    const globalConfigDir = `${homeDir}/.oclirc`;
+    const localConfigDir = `${cwd}/.ocli`;
+    const globalConfigDir = `${homeDir}/.ocli`;
 
     const fsMap: Record<string, boolean> = {
       [`${globalConfigDir}/profiles.ini`]: true,
@@ -61,8 +61,8 @@ describe("ConfigLocator", () => {
 
   it("returns configDir and specsDir even when no profiles.ini exists", () => {
     const cwd = "/project";
-    const localConfigDir = `${cwd}/.oclirc`;
-    const globalConfigDir = `${homeDir}/.oclirc`;
+    const localConfigDir = `${cwd}/.ocli`;
+    const globalConfigDir = `${homeDir}/.ocli`;
 
     const fsMap: Record<string, boolean> = {};
 

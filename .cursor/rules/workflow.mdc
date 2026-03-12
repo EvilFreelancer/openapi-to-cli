@@ -8,7 +8,7 @@ alwaysApply: true
 ### Documentation
 
 - Main documentation is `README.md` in the root of `openapi-to-cli`.
-- When changing CLI behavior, profile format or `.oclirc` structure, update `README.md`.
+- When changing CLI behavior, profile format or `.ocli` structure, update `README.md`.
 - All documentation for this project must be written in English.
 
 ### New features (TDD)

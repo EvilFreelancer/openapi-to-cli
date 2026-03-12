@@ -27,8 +27,8 @@ export class ConfigLocator {
   }
 
   resolveConfig(cwd: string): ConfigPaths {
-    const localConfigDir = path.join(cwd, ".oclirc");
-    const globalConfigDir = path.join(this.homeDir, ".oclirc");
+    const localConfigDir = path.join(cwd, ".ocli");
+    const globalConfigDir = path.join(this.homeDir, ".ocli");
 
     const localProfiles = path.join(localConfigDir, "profiles.ini");
     const globalProfiles = path.join(globalConfigDir, "profiles.ini");

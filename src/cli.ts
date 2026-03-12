@@ -2,11 +2,17 @@
 
 import path from "path";
 import yargs from "yargs";
+import axios, { AxiosRequestConfig, AxiosResponse } from "axios";
 
 import { ConfigLocator } from "./config";
 import { ProfileStore, Profile } from "./profile-store";
 import { OpenapiLoader } from "./openapi-loader";
-import { OpenapiToCommands } from "./openapi-to-commands";
+import { OpenapiToCommands, CliCommand, CliCommandOption } from "./openapi-to-commands";
+
+export interface HttpClient {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  request(config: AxiosRequestConfig): Promise<AxiosResponse<any>>;
+}
 
 export interface RunOptions {
   cwd?: string;
@@ -14,10 +20,15 @@ export interface RunOptions {
   profileStore?: ProfileStore;
   openapiLoader?: OpenapiLoader;
   stdout?: (msg: string) => void;
+  httpClient?: HttpClient;
 }
 
 const defaultStdout = (msg: string): void => {
   process.stdout.write(msg);
+};
+
+const defaultHttpClient: HttpClient = {
+  request: (config: AxiosRequestConfig) => axios.request(config),
 };
 
 interface AddProfileArgs {
@@ -29,12 +40,226 @@ interface AddProfileArgs {
   "exclude-endpoints"?: string;
 }
 
+async function runApiCommand(
+  toolName: string,
+  args: string[],
+  env: {
+    cwd: string;
+    profileStore: ProfileStore;
+    openapiLoader: OpenapiLoader;
+    stdout: (msg: string) => void;
+    httpClient: HttpClient;
+  }
+): Promise<void> {
+  const { cwd, profileStore, openapiLoader, stdout, httpClient } = env;
+  const openapiToCommands = new OpenapiToCommands();
+
+  const profile = profileStore.getCurrentProfile(cwd);
+  if (!profile) {
+    throw new Error("No current profile configured");
+  }
+
+  const spec = await openapiLoader.loadSpec(profile);
+  const commands = openapiToCommands.buildCommands(spec, profile);
+  const command = commands.find((cmd) => cmd.name === toolName);
+
+  if (!command) {
+    throw new Error(`Command ${toolName} is not available for profile ${profile.name}`);
+  }
+
+  if (args.includes("-h") || args.includes("--help")) {
+    stdout(`ocli ${command.name}\n\n`);
+
+    if (command.description) {
+      stdout(`${command.description}\n\n`);
+    }
+
+    stdout("Опции:\n\n");
+
+    const entries: Array<{
+      key: string;
+      desc: string;
+      typeLabel: string;
+      requiredLabel: string;
+    }> = [];
+
+    command.options.forEach((opt: CliCommandOption) => {
+      const key = `--${opt.name}`;
+      const requiredLabel = opt.required ? "необходимо" : "";
+      const baseType = opt.schemaType;
+      let typeLabel = "строковой тип";
+      if (baseType === "integer" || baseType === "number") {
+        typeLabel = "число";
+      } else if (baseType === "boolean") {
+        typeLabel = "булевый тип";
+      }
+      const descriptionPart = opt.description ?? "";
+      const descPrefix = opt.required ? "(required)" : "(optional)";
+      const desc = descriptionPart ? `${descPrefix} ${descriptionPart}` : descPrefix;
+
+      entries.push({
+        key,
+        desc,
+        typeLabel,
+        requiredLabel,
+      });
+    });
+
+    entries.push({
+      key: "-h, --help",
+      desc: "Показать помощь",
+      typeLabel: "булевый тип",
+      requiredLabel: "",
+    });
+
+    const maxKeyLength = entries.reduce((max, entry) => (entry.key.length > max ? entry.key.length : max), 0);
+    const maxDescLength = entries.reduce((max, entry) => (entry.desc.length > max ? entry.desc.length : max), 0);
+    const maxTypeLength = entries.reduce(
+      (max, entry) => (entry.typeLabel.length > max ? entry.typeLabel.length : max),
+      0
+    );
+
+    entries.forEach((entry, index) => {
+      const keyPadded = entry.key.padEnd(maxKeyLength + 2, " ");
+      const descPadded = entry.desc.padEnd(maxDescLength + 2, " ");
+      const typePadded = entry.typeLabel.padEnd(maxTypeLength, " ");
+      const requiredSuffix = entry.requiredLabel ? ` [${entry.requiredLabel}]` : "";
+
+      const prefix = index === entries.length - 1 ? "  " : "      ";
+      stdout(
+        `${prefix}${keyPadded}${descPadded}[${typePadded}]${requiredSuffix}\n`
+      );
+    });
+
+    stdout("\n");
+    return;
+  }
+
+  const { flags } = parseArgs(args);
+
+  const missingRequired = command.options
+    .filter((opt) => opt.required)
+    .filter((opt) => flags[opt.name] === undefined)
+    .map((opt) => opt.name);
+
+  if (missingRequired.length > 0) {
+    throw new Error(`Missing required options: ${missingRequired.map((n) => `--${n}`).join(", ")}`);
+  }
+
+  const url = buildRequestUrl(profile, command, flags);
+  const headers = buildAuthHeaders(profile);
+
+  const knownOptionNames = new Set(command.options.map((o) => o.name));
+  const body: Record<string, string> = {};
+
+  Object.keys(flags).forEach((key) => {
+    if (!knownOptionNames.has(key)) {
+      body[key] = flags[key];
+    }
+  });
+
+  const method = command.method.toUpperCase();
+  const hasBody = Object.keys(body).length > 0 && (method === "POST" || method === "PUT" || method === "PATCH");
+
+  const requestConfig: AxiosRequestConfig = {
+    method,
+    url,
+    headers: {
+      ...headers,
+      ...(hasBody ? { "Content-Type": "application/json" } : {}),
+    },
+    ...(hasBody ? { data: body } : {}),
+  };
+
+  const response = await httpClient.request(requestConfig);
+  stdout(`${JSON.stringify(response.data, null, 2)}\n`);
+}
+
+function parseArgs(args: string[]): { flags: Record<string, string>; positional: string[] } {
+  const flags: Record<string, string> = {};
+  const positional: string[] = [];
+
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    if (arg === "--") {
+      for (let j = i + 1; j < args.length; j += 1) {
+        positional.push(args[j]);
+      }
+      break;
+    }
+    if (arg.startsWith("--")) {
+      const withoutPrefix = arg.slice(2);
+      const [key, inlineValue] = withoutPrefix.split("=", 2);
+      if (inlineValue !== undefined) {
+        flags[key] = inlineValue;
+      } else if (i + 1 < args.length && !args[i + 1].startsWith("-")) {
+        flags[key] = args[i + 1];
+        i += 1;
+      } else {
+        flags[key] = "true";
+      }
+    } else {
+      positional.push(arg);
+    }
+  }
+
+  return { flags, positional };
+}
+
+function buildRequestUrl(profile: Profile, command: CliCommand, flags: Record<string, string>): string {
+  let pathValue = command.path;
+
+  command.options
+    .filter((opt) => opt.location === "path")
+    .forEach((opt) => {
+      const value = flags[opt.name];
+      if (value !== undefined) {
+        const token = `{${opt.name}}`;
+        pathValue = pathValue.replace(token, encodeURIComponent(value));
+      }
+    });
+
+  const baseUrl = profile.apiBaseUrl.replace(/\/+$/, "");
+  let url = `${baseUrl}${pathValue}`;
+
+  const queryParams = new URLSearchParams();
+  command.options
+    .filter((opt) => opt.location === "query")
+    .forEach((opt) => {
+      const value = flags[opt.name];
+      if (value !== undefined) {
+        queryParams.set(opt.name, value);
+      }
+    });
+
+  const queryString = queryParams.toString();
+  if (queryString) {
+    url += url.includes("?") ? `&${queryString}` : `?${queryString}`;
+  }
+
+  return url;
+}
+
+function buildAuthHeaders(profile: Profile): Record<string, string> {
+  const headers: Record<string, string> = {};
+
+  if (profile.apiBasicAuth) {
+    const encoded = Buffer.from(profile.apiBasicAuth).toString("base64");
+    headers.Authorization = `Basic ${encoded}`;
+  } else if (profile.apiBearerToken) {
+    headers.Authorization = `Bearer ${profile.apiBearerToken}`;
+  }
+
+  return headers;
+}
+
 export async function run(argv: string[], options?: RunOptions): Promise<void> {
   const cwd = options?.cwd ?? process.cwd();
   const configLocator = options?.configLocator ?? new ConfigLocator();
   const profileStore = options?.profileStore ?? new ProfileStore({ locator: configLocator });
   const openapiLoader = options?.openapiLoader ?? new OpenapiLoader();
   const stdout = options?.stdout ?? defaultStdout;
+  const httpClient = options?.httpClient ?? defaultHttpClient;
   const openapiToCommands = new OpenapiToCommands();
 
   const runAddProfile = async (profileName: string, args: AddProfileArgs): Promise<void> => {
@@ -70,6 +295,14 @@ export async function run(argv: string[], options?: RunOptions): Promise<void> {
       .option("api-bearer-token", { type: "string", default: "" })
       .option("include-endpoints", { type: "string", default: "" })
       .option("exclude-endpoints", { type: "string", default: "" });
+
+  const staticCommands = new Set(["onboard", "profiles", "use", "commands", "help", "--help", "-h", "--version"]);
+
+  if (argv.length > 0 && !staticCommands.has(argv[0])) {
+    const [toolName, ...rest] = argv;
+    await runApiCommand(toolName, rest, { cwd, profileStore, openapiLoader, stdout, httpClient });
+    return;
+  }
 
   await yargs(argv)
     .scriptName("ocli")

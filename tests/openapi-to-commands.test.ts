@@ -7,7 +7,7 @@ const baseProfile: Profile = {
   apiBasicAuth: "",
   apiBearerToken: "",
   openapiSpecSource: "",
-  openapiSpecCache: "/home/user/.oclirc/specs/myapi.json",
+  openapiSpecCache: "/home/user/.ocli/specs/myapi.json",
   includeEndpoints: [],
   excludeEndpoints: [],
 };
@@ -97,12 +97,14 @@ describe("OpenapiToCommands", () => {
                 in: "path",
                 required: true,
                 schema: { type: "string" },
+                description: "Channel username",
               },
               {
                 name: "limit",
                 in: "query",
                 required: false,
                 schema: { type: "integer" },
+                description: "Maximum number of items",
               },
             ],
           },
@@ -126,5 +128,6 @@ describe("OpenapiToCommands", () => {
     const usernameOption = cmd.options.find((o) => o.name === "username");
     expect(usernameOption?.required).toBe(true);
     expect(usernameOption?.location).toBe("path");
+    expect(usernameOption?.description).toBe("Channel username");
   });
 });
