@@ -1,0 +1,43 @@
+---
+description: Workflow for openapi-to-cli
+alwaysApply: true
+---
+
+## Workflow Rules
+
+### Documentation
+
+- Main documentation is `README.md` in the root of `openapi-to-cli`.
+- When changing CLI behavior, profile format or `.oclirc` structure, update `README.md`.
+- All documentation for this project must be written in English.
+
+### New features (TDD)
+
+When adding new functionality to `openapi-to-cli`:
+
+1. First write a test in `tests/` (for example for profile parsing or command generation).
+2. Run the test and make sure it fails.
+3. Implement the feature in `src/` following architecture and code-style rules.
+4. Run the test again and make sure it passes.
+5. Run all tests: `npm test` from the `openapi-to-cli` directory.
+
+### Bug fixes (TDD)
+
+When fixing a bug:
+
+1. Write a test that reproduces the bug.
+2. Make sure the test fails.
+3. Fix the code.
+4. Make sure the test passes.
+5. Run all tests.
+
+### Tests
+
+- Tests are stored in `tests/` next to `src/`.
+- Test file names: `*.test.ts`.
+- Run tests:
+
+```bash
+npm test
+```
+

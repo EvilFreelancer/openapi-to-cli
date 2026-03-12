@@ -1,0 +1,11 @@
+node_modules/
+dist/
+*.log
+.env
+.env.*
+.DS_Store
+coverage/
+*.tsbuildinfo
+package-lock.json
+tests/**/*.js
+tests/**/*.d.ts

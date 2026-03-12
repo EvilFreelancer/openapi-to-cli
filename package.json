@@ -1,0 +1,40 @@
+{
+  "name": "openapi-to-cli",
+  "version": "0.1.0",
+  "description": "CLI that turns OpenAPI/Swagger-described HTTP APIs into executable commands (ocli) with profiles and cached specs",
+  "private": false,
+  "bin": {
+    "ocli": "dist/cli.js"
+  },
+  "main": "dist/cli.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/cli.js",
+    "test": "jest"
+  },
+  "keywords": [
+    "openapi",
+    "swagger",
+    "cli",
+    "ocli",
+    "api",
+    "generator"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.7.7",
+    "ini": "^5.0.0",
+    "yargs": "^17.7.2",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/ini": "^4.1.1",
+    "@types/jest": "^29.5.12",
+    "@types/node": "^20.11.16",
+    "@types/yargs": "^17.0.33",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.1.2",
+    "typescript": "^5.3.3"
+  }
+}

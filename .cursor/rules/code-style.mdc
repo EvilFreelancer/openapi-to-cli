@@ -1,0 +1,35 @@
+---
+description: Code style for openapi-to-cli (TypeScript)
+globs: "**/*.ts"
+alwaysApply: true
+---
+
+## Code Style Rules
+
+### General rules
+
+1. All code comments for this project must be written in English.
+2. All documentation files for this project must be written in English.
+3. New files must end with a single empty line.
+4. Use straight double quotes `"`. Use the regular dash `-` for punctuation, do not use long dashes.
+
+### TypeScript
+
+- `strict: true` is enabled in `tsconfig.json`.
+- For exported functions and public APIs, prefer explicit parameter and return types.
+- For reusable object shapes, use `interface`.
+
+### File structure
+
+1. Imports first (Node/third-party, then local).
+2. Then constants and types.
+3. Then main logic (functions, classes, exports).
+
+### Naming
+
+- Classes - PascalCase.
+- Functions and methods - camelCase.
+- Configuration constants - UPPER_SNAKE_CASE or meaningful camelCase names.
+- Files - kebab-case or camelCase, consistent with existing files.
+
+
