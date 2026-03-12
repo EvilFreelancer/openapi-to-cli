@@ -176,6 +176,7 @@ The `ocli` binary provides the following core commands:
 - `ocli profiles remove <profile>` - remove a profile;
 - `ocli use <profile>` - set the profile to use when `--profile` is not passed (writes profile name to `.ocli/current`).
 - `ocli commands` - list available commands generated from the current profile and its OpenAPI spec.
+- `ocli --version` - print the CLI version baked at build time (derived from the latest git tag when available).
 
 Help:
 

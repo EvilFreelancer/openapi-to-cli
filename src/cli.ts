@@ -8,6 +8,7 @@ import { ConfigLocator } from "./config";
 import { ProfileStore, Profile } from "./profile-store";
 import { OpenapiLoader } from "./openapi-loader";
 import { OpenapiToCommands, CliCommand, CliCommandOption } from "./openapi-to-commands";
+import { VERSION } from "./version";
 
 export interface HttpClient {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -306,6 +307,8 @@ export async function run(argv: string[], options?: RunOptions): Promise<void> {
 
   await yargs(argv)
     .scriptName("ocli")
+    .version(VERSION)
+    .exitProcess(false)
     .command(
       "onboard",
       "Add a new profile (alias for profiles add default)",

@@ -8,6 +8,7 @@
   },
   "main": "dist/cli.js",
   "scripts": {
+    "prebuild": "node scripts/generate-version.js",
     "build": "tsc",
     "watch": "tsc -w",
     "start": "node dist/cli.js",

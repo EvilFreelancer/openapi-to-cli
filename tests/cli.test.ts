@@ -83,6 +83,23 @@ describe("cli", () => {
   const homeDir = "/home/user";
   const cwd = "/project";
 
+  it("--version prints baked version", async () => {
+    const { profileStore, openapiLoader } = createCliDeps(cwd, homeDir, {});
+
+    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+
+    await run(["--version"], {
+      cwd,
+      profileStore,
+      openapiLoader,
+    });
+
+    const out = logSpy.mock.calls.map((call) => String(call[0])).join("");
+    logSpy.mockRestore();
+
+    expect(out).toContain("0.0.0-dev");
+  });
+
   it("onboard creates profile default and caches spec (alias for profiles add default)", async () => {
     const localDir = `${cwd}/.ocli`;
     const profilesPath = `${localDir}/profiles.ini`;
