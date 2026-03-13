@@ -10,6 +10,8 @@ const baseProfile: Profile = {
   openapiSpecCache: "/home/user/.ocli/specs/myapi.json",
   includeEndpoints: [],
   excludeEndpoints: [],
+  commandPrefix: "",
+  customHeaders: {},
 };
 
 describe("OpenapiToCommands", () => {
@@ -42,6 +44,8 @@ describe("OpenapiToCommands", () => {
       ...baseProfile,
       includeEndpoints: [],
       excludeEndpoints: [],
+      commandPrefix: "",
+      customHeaders: {},
     };
 
     const commands: CliCommand[] = openapiToCommands.buildCommands(spec, profile);
@@ -77,6 +81,8 @@ describe("OpenapiToCommands", () => {
       ...baseProfile,
       includeEndpoints: ["get:/messages"],
       excludeEndpoints: ["get:/channels"],
+      commandPrefix: "",
+      customHeaders: {},
     };
 
     const commands: CliCommand[] = openapiToCommands.buildCommands(spec, profile);
@@ -116,6 +122,8 @@ describe("OpenapiToCommands", () => {
       ...baseProfile,
       includeEndpoints: [],
       excludeEndpoints: [],
+      commandPrefix: "",
+      customHeaders: {},
     };
 
     const commands: CliCommand[] = openapiToCommands.buildCommands(spec, profile);
@@ -129,5 +137,48 @@ describe("OpenapiToCommands", () => {
     expect(usernameOption?.required).toBe(true);
     expect(usernameOption?.location).toBe("path");
     expect(usernameOption?.description).toBe("Channel username");
+  });
+
+  it("applies command prefix to all command names", () => {
+    const spec: OpenapiSpecLike = {
+      openapi: "3.0.0",
+      paths: {
+        "/messages": { get: { summary: "List messages" } },
+        "/users": { get: { summary: "List users" } },
+      },
+    };
+
+    const profile: Profile = {
+      ...baseProfile,
+      commandPrefix: "api_",
+    };
+
+    const commands = openapiToCommands.buildCommands(spec, profile);
+    const names = commands.map((c) => c.name).sort();
+    expect(names).toEqual(["api_messages", "api_users"]);
+  });
+
+  it("forces path parameters to be required even if spec says otherwise", () => {
+    const spec: OpenapiSpecLike = {
+      openapi: "3.0.0",
+      paths: {
+        "/users/{user_id}": {
+          get: {
+            parameters: [
+              {
+                name: "user_id",
+                in: "path",
+                required: false,
+                schema: { type: "string" },
+              },
+            ],
+          },
+        },
+      },
+    };
+
+    const commands = openapiToCommands.buildCommands(spec, baseProfile);
+    const opt = commands[0].options.find((o) => o.name === "user_id");
+    expect(opt?.required).toBe(true);
   });
 });

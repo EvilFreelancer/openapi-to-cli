@@ -45,6 +45,8 @@ When an agent has access to 200+ API endpoints, loading all of them as MCP tools
 | Non-HTTP integrations (desktop apps) | ❌ | ❌ | ✅ |
 | Session management / undo-redo | ❌ | ❌ | ✅ |
 | JSON structured output | ❌ | ✅ | ✅ |
+| Custom HTTP headers | ✅ | ❌ | ❌ |
+| Command name prefix | ✅ | ❌ | ❌ |
 | Basic / Bearer auth | ✅ | ✅ | ❌ |
 | OAuth2 / Auth0 | ❌ | ✅ | ✅ |
 | Response JMESPath filtering | ❌ | ✅ | ❌ |
@@ -63,7 +65,9 @@ ocli profiles add myapi \
   --openapi-spec http://127.0.0.1:2222/openapi.json \
   --api-bearer-token "..." \
   --include-endpoints get:/messages,get:/channels \
-  --exclude-endpoints post:/admin/secret
+  --exclude-endpoints post:/admin/secret \
+  --command-prefix "myapi_" \
+  --custom-headers "X-Tenant:acme,X-Request-Source:cli"
 ```
 
 Alternatively, `ocli onboard` (with the same options, no profile name) creates a profile named `default`.
@@ -228,7 +232,9 @@ The `ocli` binary provides the following core commands:
   - `--api-basic-auth <user:pass>` - optional;
   - `--api-bearer-token <token>` - optional;
   - `--include-endpoints <list>` - comma-separated `method:path`;
-  - `--exclude-endpoints <list>` - comma-separated `method:path`.
+  - `--exclude-endpoints <list>` - comma-separated `method:path`;
+  - `--command-prefix <prefix>` - prefix for command names (e.g. `api_` -> `api_messages`, `api_users`);
+  - `--custom-headers <list>` - custom HTTP headers as comma-separated `key:value` pairs (e.g. `X-Tenant:acme,X-Request-Source:cli`).
 
 - `ocli profiles add <name>` - add a new profile with the given name and cache the OpenAPI spec. Same options as `onboard` (profile name is the positional argument).
 
@@ -270,6 +276,19 @@ The project mirrors parts of the `openapi-to-mcp` architecture but implements a 
 - `command-search` - BM25 and regex search over generated commands for discovery on large API surfaces.
 - `bm25` - generic BM25 ranking engine with Robertson IDF smoothing and min-heap top-K extraction.
 - `cli` - entry point, argument parser, command registration, help output.
+
+### Using with AI agents (Claude Code skill example)
+
+An example skill file is provided in [`examples/skill-ocli-api.md`](examples/skill-ocli-api.md). Copy it to `.claude/skills/api.md` in your project to let Claude Code discover and use your API via `ocli`:
+
+```bash
+cp examples/skill-ocli-api.md .claude/skills/api.md
+```
+
+The agent workflow:
+1. `ocli commands --query "upload file"` — discover the right command
+2. `ocli files_content_post --help` — check parameters
+3. `ocli files_content_post --file ./data.csv` — execute
 
 ### Similar projects
 

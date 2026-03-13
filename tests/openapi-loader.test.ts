@@ -84,6 +84,8 @@ describe("OpenapiLoader", () => {
     openapiSpecCache: "/home/user/.ocli/specs/myapi.json",
     includeEndpoints: [],
     excludeEndpoints: [],
+  commandPrefix: "",
+  customHeaders: {},
   };
 
   it("downloads spec from HTTP URL and caches it when cache is missing", async () => {

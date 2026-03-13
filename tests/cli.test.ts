@@ -575,4 +575,60 @@ describe("cli", () => {
     const out = log.join("");
     expect(out).toContain('"ok": true');
   });
+
+  it("sends custom headers from profile in API requests", async () => {
+    const localDir = `${cwd}/.ocli`;
+    const profilesPath = `${localDir}/profiles.ini`;
+    const cachePath = `${localDir}/specs/headers-api.json`;
+
+    const spec = {
+      openapi: "3.0.0",
+      paths: {
+        "/data": {
+          get: { summary: "Get data" },
+        },
+      },
+    };
+
+    const iniContent = [
+      "[headers-api]",
+      "api_base_url = https://api.example.com",
+      "api_basic_auth = ",
+      "api_bearer_token = tok123",
+      "openapi_spec_source = /spec.json",
+      `openapi_spec_cache = ${cachePath}`,
+      "include_endpoints = ",
+      "exclude_endpoints = ",
+      "command_prefix = ",
+      "custom_headers = X-Custom-Id:abc123,X-Tenant:myorg",
+      "",
+    ].join("\n");
+
+    const capturedConfigs: unknown[] = [];
+    const fakeHttpClient: HttpClient = {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      request: async (config: any) => {
+        capturedConfigs.push(config);
+        return { status: 200, statusText: "OK", headers: {}, config, data: { ok: true } };
+      },
+    };
+
+    const { profileStore, openapiLoader } = createCliDeps(cwd, homeDir, {
+      [profilesPath]: iniContent,
+      [cachePath]: JSON.stringify(spec),
+      [`${localDir}/current`]: "headers-api",
+    });
+
+    await run(["data", "--help"], {
+      cwd,
+      profileStore,
+      openapiLoader,
+      httpClient: fakeHttpClient,
+      stdout: () => {},
+    });
+
+    const profile = profileStore.getProfileByName(cwd, "headers-api");
+    expect(profile?.customHeaders).toEqual({ "X-Custom-Id": "abc123", "X-Tenant": "myorg" });
+    expect(profile?.commandPrefix).toBe("");
+  });
 });
