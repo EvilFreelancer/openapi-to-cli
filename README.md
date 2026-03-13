@@ -265,3 +265,14 @@ The project mirrors parts of the `openapi-to-mcp` architecture but implements a 
 - `command-search` - BM25 and regex search over generated commands for discovery on large API surfaces.
 - `bm25` - generic BM25 ranking engine with Robertson IDF smoothing and min-heap top-K extraction.
 - `cli` - entry point, argument parser, command registration, help output.
+
+### Similar projects
+
+- [openapi-cli-generator](https://github.com/danielgtaylor/openapi-cli-generator) - generates a CLI from an OpenAPI 3 specification using code generation.
+- [openapi-commander](https://github.com/bcoughlan/openapi-commander) - Node.js command-line tool generator based on OpenAPI definitions.
+- [OpenAPI Generator](https://openapi-generator.tech/docs/usage) - general-purpose OpenAPI code generator that can also generate CLI clients.
+- [openapi2cli](https://pypi.org/project/openapi2cli/) - Python tool that builds CLI interfaces for OpenAPI 3 APIs.
+
+### License
+
+This project is licensed under the MIT License, see the [LICENSE](./LICENSE) file in the repository root for details.
