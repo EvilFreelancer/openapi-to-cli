@@ -36,3 +36,43 @@
 ## Summary
 
 **13 tests | 13 passed | 0 failed | ~1s**
+
+---
+
+## CLI Output Examples (Box API, loaded from YAML)
+
+### `ocli search --query "upload file" --limit 5`
+
+```
+Found 5 command(s):
+
+  files_upload_sessions_post                POST  /files/upload_sessions  Create upload session
+  files_upload_sessions_id_put              PUT   /files/upload_sessions/{upload_session_id}  Upload part of file
+  files_upload_sessions_id_commit_post      POST  /files/upload_sessions/{upload_session_id}/commit  Commit upload session
+  files_content_post                        POST  /files/content  Upload a file
+  files_id_content_post                     POST  /files/{file_id}/content  Upload a file version
+```
+
+### `ocli search --query "create folder" --limit 5`
+
+```
+Found 5 command(s):
+
+  folders_post                POST  /folders  Create folder
+  folders_id_get              GET   /folders/{folder_id}  Get folder info
+  folders_id_items            GET   /folders/{folder_id}/items  List items in folder
+  folders_id_copy_post        POST  /folders/{folder_id}/copy  Copy folder
+  folders_id_put              PUT   /folders/{folder_id}  Update folder
+```
+
+### `ocli search --regex "metadata" --limit 5`
+
+```
+Found 5 command(s):
+
+  files_id_metadata                            GET     /files/{file_id}/metadata  List metadata on file
+  files_id_metadata_scope_template_get         GET     /files/{file_id}/metadata/{scope}/{template_key}  Get metadata instance on file
+  files_id_metadata_scope_template_post        POST    /files/{file_id}/metadata/{scope}/{template_key}  Create metadata instance on file
+  files_id_metadata_scope_template_put         PUT     /files/{file_id}/metadata/{scope}/{template_key}  Update metadata instance on file
+  files_id_metadata_scope_template_delete      DELETE  /files/{file_id}/metadata/{scope}/{template_key}  Remove metadata instance from file
+```

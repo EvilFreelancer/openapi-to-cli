@@ -1,11 +1,50 @@
 ## OpenAPI to CLI (ocli)
 
-`openapi-to-cli` (short `ocli`) is a TypeScript CLI concept that turns any HTTP API described by an OpenAPI/Swagger spec into a set of CLI commands.
+`openapi-to-cli` (short `ocli`) is a TypeScript CLI that turns any HTTP API described by an OpenAPI/Swagger spec into a set of CLI commands — at runtime, without code generation.
 
 - **Input**: OpenAPI/Swagger spec (URL or file) plus API connection settings.
 - **Output**: an executable `ocli` binary where each API operation is exposed as a dedicated subcommand.
 
-Unlike [openapi-to-mcp](https://github.com/EvilFreelancer/openapi-to-mcp), which starts an MCP server with tools, `ocli` provides a direct command line interface.
+Unlike [openapi-to-mcp](https://github.com/EvilFreelancer/openapi-to-mcp), which starts an MCP server with tools, `ocli` provides a direct command-line interface.
+
+### Why convert OpenAPI spec to CLI?
+
+The trend is clear: **CLI commands are cheaper and more native than MCP tools** for AI agents.
+
+| Factor | MCP Tools | CLI Commands |
+|--------|-----------|--------------|
+| **Token cost** | Each tool call requires full JSON schema in context on every request | CLI commands are invoked by name with flags — minimal token overhead |
+| **Startup overhead** | MCP server must be running, connected via transport layer | Single process, instant execution, zero transport cost |
+| **Composability** | Tools are isolated in MCP server scope | CLI commands pipe, chain, and integrate with shell scripts natively |
+| **Agent compatibility** | Requires MCP-aware client (Claude, Cursor, etc.) | Any agent that can run shell commands — universal |
+| **Discoverability** | Agent must hold all tool schemas in context window | `--help` for quick lookup, `search --query` for BM25-ranked discovery |
+| **Multi-API** | One MCP server per API, each consuming context | Multiple profiles in one binary, switch with `ocli use <profile>` |
+| **Endpoint scoping** | All tools exposed at once, no per-session filtering | Per-profile `--include/--exclude-endpoints` — same API, different command sets for different roles |
+| **Debugging** | Opaque transport, hard to inspect | Plain HTTP requests, visible in terminal |
+
+When an agent has access to 200+ API endpoints, loading all of them as MCP tools burns thousands of tokens per turn. With `ocli`, the agent calls `ocli search --query "upload files"` to discover relevant commands, then executes them directly. The context window stays clean.
+
+**Bottom line**: if your agent talks to HTTP APIs, CLI is the most token-efficient and portable interface available today.
+
+### Comparison with [openapi-cli-generator](https://github.com/danielgtaylor/openapi-cli-generator)
+
+| Feature | ocli | openapi-cli-generator |
+|---------|:----:|:---------------------:|
+| Runtime interpretation (no codegen) | ✅ | ❌ |
+| Zero-setup install (`npx`) | ✅ | ❌ |
+| Multiple API profiles in one binary | ✅ | ❌ |
+| Multiple endpoint sets per API | ✅ | ❌ |
+| BM25 command search | ✅ | ❌ |
+| Regex command search | ✅ | ❌ |
+| Per-profile endpoint filtering | ✅ | ❌ |
+| Spec caching with refresh | ✅ | ❌ |
+| Add new API without recompile | ✅ | ❌ |
+| Basic / Bearer auth | ✅ | ✅ |
+| OAuth2 / Auth0 | ❌ | ✅ |
+| Response JMESPath filtering | ❌ | ✅ |
+| Syntax-highlighted output | ❌ | ✅ |
+| Middleware / waiters | ❌ | ✅ |
+| Active project | ✅ | ❌ (deprecated) |
 
 ### High level idea
 
@@ -42,6 +81,22 @@ or using the default profile:
 ocli use myapi
 ocli messages --limit 10
 ```
+
+### Command search
+
+When the API surface is too large for `--help`, use the built-in search:
+
+```bash
+# BM25 natural language search
+ocli search --query "upload files"
+ocli search -q "list messages" --limit 5
+
+# Regex pattern matching
+ocli search --regex "admin.*get"
+ocli search -r "messages" -n 3
+```
+
+The BM25 engine (ported from [picoclaw](https://github.com/sipeed/picoclaw)) ranks commands by relevance across name, method, path, description, and parameter names. This enables agents to discover the right endpoint without loading all command schemas into context.
 
 ### Installation and usage via npm and npx
 
@@ -97,7 +152,7 @@ api_bearer_token = MY_TOKEN
 openapi_spec_source = http://127.0.0.1:1111/openapi.json
 openapi_spec_cache = /home/user/.ocli/specs/default.json
 include_endpoints = get:/messages,get:/channels
-exclude_endpoints = 
+exclude_endpoints =
 
 [myapi]
 api_base_url = http://127.0.0.1:2222
@@ -106,7 +161,7 @@ api_bearer_token = MY_TOKEN
 openapi_spec_source = http://127.0.0.1:2222/openapi.json
 openapi_spec_cache = /home/user/.ocli/specs/myapi.json
 include_endpoints = get:/messages,get:/channels
-exclude_endpoints = 
+exclude_endpoints =
 ```
 
 The local file `./.ocli/profiles.ini`, if present, fully overrides the global one when resolving profiles.
@@ -176,6 +231,8 @@ The `ocli` binary provides the following core commands:
 - `ocli profiles remove <profile>` - remove a profile;
 - `ocli use <profile>` - set the profile to use when `--profile` is not passed (writes profile name to `.ocli/current`).
 - `ocli commands` - list available commands generated from the current profile and its OpenAPI spec.
+- `ocli search --query <text>` - BM25-ranked search across commands by name, path, description.
+- `ocli search --regex <pattern>` - regex pattern search across commands.
 - `ocli --version` - print the CLI version baked at build time (derived from the latest git tag when available).
 
 Help:
@@ -185,31 +242,26 @@ Help:
 - `ocli profiles -h|--help` - profile management help;
 - `ocli <tool-name> -h|--help` - description of a particular operation, list of options and their types (generated from OpenAPI).
 
-### Architecture (concept)
+### Architecture
 
-The `openapi-to-cli` project mirrors parts of the `openapi-to-mcp` architecture but implements a CLI instead of an MCP server:
+```
+src/
+├── cli.ts                  # Entry point, command routing, HTTP requests
+├── config.ts               # .ocli directory resolution (local > global)
+├── openapi-loader.ts       # OpenAPI spec download and caching
+├── openapi-to-commands.ts  # OpenAPI → CLI command generation
+├── command-search.ts       # BM25 + regex search over commands
+├── bm25.ts                 # BM25 ranking engine (ported from picoclaw)
+├── profile-store.ts        # Profile persistence in INI format
+└── version.ts              # Version constant (generated at build)
+```
+
+The project mirrors parts of the `openapi-to-mcp` architecture but implements a CLI instead of an MCP server:
 
 - `config` - reads profile configuration and cache paths (INI files, global and local `.ocli` lookup).
 - `profile-store` - works with `profiles.ini` (read, write, select profile, current profile).
 - `openapi-loader` - loads and caches the OpenAPI spec (URL or file) into `.ocli/specs/`.
-- `openapi-to-commands` - parses OpenAPI, applies include/exclude filters, generates command names and option schemas (based on `openapi-to-mcp/openapi-to-tools.ts` ideas).
+- `openapi-to-commands` - parses OpenAPI, applies include/exclude filters, generates command names and option schemas.
+- `command-search` - BM25 and regex search over generated commands for discovery on large API surfaces.
+- `bm25` - generic BM25 ranking engine with Robertson IDF smoothing and min-heap top-K extraction.
 - `cli` - entry point, argument parser, command registration, help output.
-
-### Next implementation steps
-
-This `openapi-to-cli` directory currently documents the concept and architecture of the future CLI project.
-
-When moving to implementation, we will:
-
-- add full CLI logic in `src/` (argument parsing, commands, profile handling, spec loading);
-- add tests for:
-  - parsing and persisting `profiles.ini`;
-  - caching and loading OpenAPI specs;
-  - mapping OpenAPI operations to commands and options.
-
-The project is intended to be published as an npm package so it can be invoked as:
-
-```bash
-npx openapi-to-cli onboard ...
-ocli messages_get --profile myapi ...
-```
