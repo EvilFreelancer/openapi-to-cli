@@ -108,6 +108,44 @@ ocli commands -r "messages" -n 3
 
 The BM25 engine (ported from [picoclaw](https://github.com/sipeed/picoclaw)) ranks commands by relevance across name, method, path, description, and parameter names. This enables agents to discover the right endpoint without loading all command schemas into context. The legacy `ocli search` command is kept as a deprecated alias and internally forwards to `ocli commands` with the same flags.
 
+### Benchmark: MCP tools vs CLI (Petstore API, 19 endpoints)
+
+Run the benchmark yourself:
+
+```bash
+npx ts-node benchmarks/benchmark.ts
+```
+
+Results on the Swagger Petstore API (19 endpoints, 15 natural-language queries):
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  TOKEN OVERHEAD PER TURN (tool definitions + system prompt) │
+├─────────────────────────────────────────────────────────────┤
+│  MCP (19 tools)  ██████████████████████████████ 2 964 tok  │
+│  CLI (1 tool)    ██ 176 tok                                │
+│  Ratio: 17x more overhead with MCP per request              │
+├─────────────────────────────────────────────────────────────┤
+│  SCALING: MCP OVERHEAD vs ENDPOINTS                         │
+├─────────────────────────────────────────────────────────────┤
+│    19 ep  █                          2,925 tok ← Petstore   │
+│   100 ep  ███                       15,395 tok              │
+│   845 ep  ████████████████████████ 130,086 tok ← GitHub API │
+│   CLI:    ▪                            188 tok  (constant)  │
+├─────────────────────────────────────────────────────────────┤
+│  VERDICT                                                    │
+├─────────────────────────────────────────────────────────────┤
+│             Tokens/turn    Accuracy (top-3)    Cost/month*  │
+│  MCP          2,964         100%               $1,702       │
+│  CLI            176          93%               $4.23        │
+│  Δ             -94%          -7%              -$1,698       │
+│                                                             │
+│  * 845 endpoints, 100 tasks/day, Claude Sonnet $3/M input  │
+└─────────────────────────────────────────────────────────────┘
+```
+
+CLI trades 7% accuracy for 94% token savings. The miss is recoverable — the agent can retry with a different query. MCP becomes impractical above ~200 endpoints.
+
 ### Installation and usage via npm and npx
 
 To use `ocli` locally without installing it globally you can rely on `npx`:
