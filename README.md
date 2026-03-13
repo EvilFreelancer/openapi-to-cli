@@ -26,25 +26,31 @@ When an agent has access to 200+ API endpoints, loading all of them as MCP tools
 
 **Bottom line**: if your agent talks to HTTP APIs, CLI is the most token-efficient and portable interface available today.
 
-### Comparison with [openapi-cli-generator](https://github.com/danielgtaylor/openapi-cli-generator)
+### Comparison
 
-| Feature | ocli | openapi-cli-generator |
-|---------|:----:|:---------------------:|
-| Runtime interpretation (no codegen) | ✅ | ❌ |
-| Zero-setup install (`npx`) | ✅ | ❌ |
-| Multiple API profiles in one binary | ✅ | ❌ |
-| Multiple endpoint sets per API | ✅ | ❌ |
-| BM25 command search | ✅ | ❌ |
-| Regex command search | ✅ | ❌ |
-| Per-profile endpoint filtering | ✅ | ❌ |
-| Spec caching with refresh | ✅ | ❌ |
-| Add new API without recompile | ✅ | ❌ |
-| Basic / Bearer auth | ✅ | ✅ |
-| OAuth2 / Auth0 | ❌ | ✅ |
-| Response JMESPath filtering | ❌ | ✅ |
-| Syntax-highlighted output | ❌ | ✅ |
-| Middleware / waiters | ❌ | ✅ |
-| Active project | ✅ | ❌ (deprecated) |
+| Feature | ocli | [openapi-cli-generator](https://github.com/danielgtaylor/openapi-cli-generator) | [CLI-Anything](https://github.com/HKUDS/CLI-Anything) |
+|---------|:----:|:---------------------:|:-------------:|
+| Runtime interpretation (no codegen) | ✅ | ❌ | ❌ |
+| Works without LLM | ✅ | ✅ | ❌ |
+| Zero-setup install (`npx`) | ✅ | ❌ | ❌ |
+| Instant API onboarding (seconds) | ✅ | ❌ | ❌ |
+| Multiple API profiles in one binary | ✅ | ❌ | ❌ |
+| Multiple endpoint sets per API | ✅ | ❌ | ❌ |
+| BM25 command search | ✅ | ❌ | ❌ |
+| Regex command search | ✅ | ❌ | ❌ |
+| Per-profile endpoint filtering | ✅ | ❌ | ❌ |
+| OpenAPI/Swagger spec (JSON + YAML) | ✅ | ✅ | ❌ |
+| Spec caching with refresh | ✅ | ❌ | ❌ |
+| Add new API without recompile | ✅ | ❌ | ❌ |
+| Non-HTTP integrations (desktop apps) | ❌ | ❌ | ✅ |
+| Session management / undo-redo | ❌ | ❌ | ✅ |
+| JSON structured output | ❌ | ✅ | ✅ |
+| Basic / Bearer auth | ✅ | ✅ | ❌ |
+| OAuth2 / Auth0 | ❌ | ✅ | ✅ |
+| Response JMESPath filtering | ❌ | ✅ | ❌ |
+| Syntax-highlighted output | ❌ | ✅ | ❌ |
+| Auto-generated tests | ❌ | ❌ | ✅ |
+| Active project | ✅ | ❌ (deprecated) | ✅ |
 
 ### High level idea
 
