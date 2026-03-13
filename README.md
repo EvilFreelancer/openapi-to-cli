@@ -110,13 +110,15 @@ The BM25 engine (ported from [picoclaw](https://github.com/sipeed/picoclaw)) ran
 
 ### Benchmark: MCP tools vs CLI (Petstore API, 19 endpoints)
 
+Tested against [Swagger Petstore](https://petstore3.swagger.io/) ([OpenAPI spec](https://petstore3.swagger.io/api/v3/openapi.json)). Scaling projections use the [GitHub API](https://api.apis.guru/v2/specs/github.com/api.github.com/1.1.4/openapi.json) (845 endpoints) and [Box API](https://api.apis.guru/v2/specs/box.com/2.0.0/openapi.yaml) (258 endpoints, YAML).
+
 Run the benchmark yourself:
 
 ```bash
 npx ts-node benchmarks/benchmark.ts
 ```
 
-Results on the Swagger Petstore API (19 endpoints, 15 natural-language queries):
+Results (19 endpoints, 15 natural-language queries):
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
