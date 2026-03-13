@@ -122,8 +122,8 @@ Results on the Swagger Petstore API (19 endpoints, 15 natural-language queries):
 ┌─────────────────────────────────────────────────────────────┐
 │  TOKEN OVERHEAD PER TURN (tool definitions + system prompt) │
 ├─────────────────────────────────────────────────────────────┤
-│  MCP (19 tools)  ██████████████████████████████ 2 964 tok  │
-│  CLI (1 tool)    ██ 176 tok                                │
+│  MCP (19 tools)  ██████████████████████████████ 2 964 tok   │
+│  CLI (1 tool)    ██ 176 tok                                 │
 │  Ratio: 17x more overhead with MCP per request              │
 ├─────────────────────────────────────────────────────────────┤
 │  SCALING: MCP OVERHEAD vs ENDPOINTS                         │
@@ -140,7 +140,7 @@ Results on the Swagger Petstore API (19 endpoints, 15 natural-language queries):
 │  CLI            176          93%               $4.23        │
 │  Δ             -94%          -7%              -$1,698       │
 │                                                             │
-│  * 845 endpoints, 100 tasks/day, Claude Sonnet $3/M input  │
+│  * 845 endpoints, 100 tasks/day, Claude Sonnet $3/M input   │
 └─────────────────────────────────────────────────────────────┘
 ```
 
