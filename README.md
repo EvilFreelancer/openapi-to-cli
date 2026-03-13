@@ -84,19 +84,19 @@ ocli messages --limit 10
 
 ### Command search
 
-When the API surface is too large for `--help`, use the built-in search:
+When the API surface is too large for `--help`, use command filtering with `commands`:
 
 ```bash
 # BM25 natural language search
-ocli search --query "upload files"
-ocli search -q "list messages" --limit 5
+ocli commands --query "upload files"
+ocli commands -q "list messages" --limit 5
 
 # Regex pattern matching
-ocli search --regex "admin.*get"
-ocli search -r "messages" -n 3
+ocli commands --regex "admin.*get"
+ocli commands -r "messages" -n 3
 ```
 
-The BM25 engine (ported from [picoclaw](https://github.com/sipeed/picoclaw)) ranks commands by relevance across name, method, path, description, and parameter names. This enables agents to discover the right endpoint without loading all command schemas into context.
+The BM25 engine (ported from [picoclaw](https://github.com/sipeed/picoclaw)) ranks commands by relevance across name, method, path, description, and parameter names. This enables agents to discover the right endpoint without loading all command schemas into context. The legacy `ocli search` command is kept as a deprecated alias and internally forwards to `ocli commands` with the same flags.
 
 ### Installation and usage via npm and npx
 
@@ -230,9 +230,8 @@ The `ocli` binary provides the following core commands:
 - `ocli profiles show <profile>` - show profile details;
 - `ocli profiles remove <profile>` - remove a profile;
 - `ocli use <profile>` - set the profile to use when `--profile` is not passed (writes profile name to `.ocli/current`).
-- `ocli commands` - list available commands generated from the current profile and its OpenAPI spec.
-- `ocli search --query <text>` - BM25-ranked search across commands by name, path, description.
-- `ocli search --regex <pattern>` - regex pattern search across commands.
+- `ocli commands` - list available commands generated from the current profile and its OpenAPI spec, optionally filter them with `--query` (BM25) or `--regex`.
+- `ocli search` - deprecated alias for `ocli commands` with `--query/--regex`, kept for backward compatibility.
 - `ocli --version` - print the CLI version baked at build time (derived from the latest git tag when available).
 
 Help:

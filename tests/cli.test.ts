@@ -329,6 +329,112 @@ describe("cli", () => {
     expect(out).toContain("api_v1_search  Search in content index");
   });
 
+  it("commands supports regex filtering of commands", async () => {
+    const localDir = `${cwd}/.ocli`;
+    const profilesPath = `${localDir}/profiles.ini`;
+    const specPath = "/project/spec.json";
+    const cachePath = `${localDir}/specs/messages-api.json`;
+
+    const spec = {
+      openapi: "3.0.0",
+      paths: {
+        "/messages": {
+          get: {
+            summary: "List messages",
+          },
+        },
+        "/status": {
+          get: {
+            summary: "Get status",
+          },
+        },
+      },
+    };
+
+    const iniContent = [
+      "[messages-api]",
+      "api_base_url = https://api.example.com",
+      "api_basic_auth = ",
+      "api_bearer_token = ",
+      `openapi_spec_source = ${specPath}`,
+      `openapi_spec_cache = ${cachePath}`,
+      "include_endpoints = get:/messages,get:/status",
+      "exclude_endpoints = ",
+      "",
+    ].join("\n");
+
+    const log: string[] = [];
+    const { profileStore, openapiLoader } = createCliDeps(cwd, homeDir, {
+      [profilesPath]: iniContent,
+      [`${localDir}/current`]: "messages-api",
+      [specPath]: JSON.stringify(spec),
+    });
+
+    await run(["commands", "--regex", "messages"], {
+      cwd,
+      profileStore,
+      openapiLoader,
+      stdout: (msg: string) => log.push(msg),
+    });
+
+    const out = log.join("");
+    expect(out).toContain("messages_get");
+    expect(out).not.toContain("status");
+  });
+
+  it("commands supports BM25 query filtering of commands", async () => {
+    const localDir = `${cwd}/.ocli`;
+    const profilesPath = `${localDir}/profiles.ini`;
+    const specPath = "/project/spec.json";
+    const cachePath = `${localDir}/specs/messages-api.json`;
+
+    const spec = {
+      openapi: "3.0.0",
+      paths: {
+        "/messages": {
+          get: {
+            summary: "List messages",
+          },
+        },
+        "/status": {
+          get: {
+            summary: "Get status",
+          },
+        },
+      },
+    };
+
+    const iniContent = [
+      "[messages-api]",
+      "api_base_url = https://api.example.com",
+      "api_basic_auth = ",
+      "api_bearer_token = ",
+      `openapi_spec_source = ${specPath}`,
+      `openapi_spec_cache = ${cachePath}`,
+      "include_endpoints = get:/messages,get:/status",
+      "exclude_endpoints = ",
+      "",
+    ].join("\n");
+
+    const log: string[] = [];
+    const { profileStore, openapiLoader } = createCliDeps(cwd, homeDir, {
+      [profilesPath]: iniContent,
+      [`${localDir}/current`]: "messages-api",
+      [specPath]: JSON.stringify(spec),
+    });
+
+    await run(["commands", "--query", "list messages"], {
+      cwd,
+      profileStore,
+      openapiLoader,
+      stdout: (msg: string) => log.push(msg),
+    });
+
+    const out = log.join("");
+    expect(out).toContain("messages_get");
+    expect(out).not.toContain("status");
+  });
+
   it("commands add method suffix when spec path has multiple methods even if only one is included", async () => {
     const localDir = `${cwd}/.ocli`;
     const profilesPath = `${localDir}/profiles.ini`;

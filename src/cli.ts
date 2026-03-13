@@ -376,9 +376,27 @@ export async function run(argv: string[], options?: RunOptions): Promise<void> {
     )
     .command(
       "commands",
-      "List available commands for the current profile",
-      (y) => y.version(false),
-      async () => {
+      "List available commands for the current profile (supports --query/--regex search filters)",
+      (y) =>
+        y
+          .version(false)
+          .option("query", {
+            alias: "q",
+            type: "string",
+            description: "Natural language search query to filter commands",
+          })
+          .option("regex", {
+            alias: "r",
+            type: "string",
+            description: "Regex pattern to filter commands by name, path, or description",
+          })
+          .option("limit", {
+            alias: "n",
+            type: "number",
+            default: 10,
+            description: "Maximum number of results when using query or regex filters",
+          }),
+      async (args) => {
         const profile = profileStore.getCurrentProfile(cwd);
         if (!profile) {
           throw new Error("No current profile configured");
@@ -390,54 +408,21 @@ export async function run(argv: string[], options?: RunOptions): Promise<void> {
           return;
         }
 
-        stdout(`Available commands for profile ${profile.name}:\n\n`);
+        const hasFilters = Boolean(args.query || args.regex);
 
-        const maxNameLength = commands.reduce((max, cmd) => (cmd.name.length > max ? cmd.name.length : max), 0);
-        const padding = maxNameLength + 2;
+        if (!hasFilters) {
+          stdout(`Available commands for profile ${profile.name}:\n\n`);
 
-        commands.forEach((cmd) => {
-          const description = cmd.description ?? "";
-          const namePadded = cmd.name.padEnd(padding, " ");
-          stdout(`  ${namePadded}${description}\n`);
-        });
-      }
-    )
-    .command(
-      "search",
-      "Search commands by query (BM25) or regex pattern",
-      (y) =>
-        y
-          .version(false)
-          .option("query", {
-            alias: "q",
-            type: "string",
-            description: "Natural language search query",
-          })
-          .option("regex", {
-            alias: "r",
-            type: "string",
-            description: "Regex pattern to match command name, path, or description",
-          })
-          .option("limit", {
-            alias: "n",
-            type: "number",
-            default: 10,
-            description: "Maximum number of results",
-          })
-          .check((args) => {
-            if (!args.query && !args.regex) {
-              throw new Error("Provide --query or --regex");
-            }
-            return true;
-          }),
-      async (args) => {
-        const profile = profileStore.getCurrentProfile(cwd);
-        if (!profile) {
-          throw new Error("No current profile configured");
+          const maxNameLength = commands.reduce((max, cmd) => (cmd.name.length > max ? cmd.name.length : max), 0);
+          const padding = maxNameLength + 2;
+
+          commands.forEach((cmd) => {
+            const description = cmd.description ?? "";
+            const namePadded = cmd.name.padEnd(padding, " ");
+            stdout(`  ${namePadded}${description}\n`);
+          });
+          return;
         }
-
-        const spec = await openapiLoader.loadSpec(profile);
-        const commands = openapiToCommands.buildCommands(spec, profile);
 
         const searcher = new CommandSearch();
         searcher.load(commands);
@@ -452,17 +437,67 @@ export async function run(argv: string[], options?: RunOptions): Promise<void> {
           return;
         }
 
-        const maxName = results.reduce((m, r) => (r.name.length > m ? r.name.length : m), 0);
-        const maxMethod = results.reduce((m, r) => (r.method.length > m ? r.method.length : m), 0);
+        stdout(`Available commands for profile ${profile.name}:\n\n`);
 
-        stdout(`Found ${results.length} command(s):\n\n`);
-        for (const r of results) {
-          const name = r.name.padEnd(maxName + 2);
-          const method = r.method.padEnd(maxMethod + 1);
-          const desc = r.description ?? "";
-          const scorePart = r.score < 1 ? ` [score: ${r.score}]` : "";
-          stdout(`  ${name}${method} ${r.path}  ${desc}${scorePart}\n`);
+        const maxNameLength = results.reduce((max, r) => (r.name.length > max ? r.name.length : max), 0);
+        const padding = maxNameLength + 2;
+
+        results.forEach((r) => {
+          const description = r.description ?? "";
+          const namePadded = r.name.padEnd(padding, " ");
+          stdout(`  ${namePadded}${description}\n`);
+        });
+      }
+    )
+    .command(
+      "search",
+      "Deprecated: use 'commands --query/--regex' instead",
+      (y) =>
+        y
+          .version(false)
+          .option("query", {
+            alias: "q",
+            type: "string",
+            description: "Natural language search query (deprecated, use commands --query instead)",
+          })
+          .option("regex", {
+            alias: "r",
+            type: "string",
+            description: "Regex pattern to match command name, path, or description (deprecated, use commands --regex instead)",
+          })
+          .option("limit", {
+            alias: "n",
+            type: "number",
+            default: 10,
+            description: "Maximum number of results",
+          })
+          .check((args) => {
+            if (!args.query && !args.regex) {
+              throw new Error("Provide --query or --regex");
+            }
+            return true;
+          }),
+      async (args) => {
+        stdout("Warning: 'search' is deprecated, use 'commands --query/--regex' instead.\n\n");
+
+        const limit = (args.limit as number) ?? 10;
+        const forwardedArgs: string[] = [];
+        if (args.query) {
+          forwardedArgs.push("--query", String(args.query));
         }
+        if (args.regex) {
+          forwardedArgs.push("--regex", String(args.regex));
+        }
+        forwardedArgs.push("--limit", String(limit));
+
+        await run(["commands", ...forwardedArgs], {
+          cwd,
+          configLocator,
+          profileStore,
+          openapiLoader,
+          stdout,
+          httpClient,
+        });
       }
     )
     .demandCommand(1, "")
