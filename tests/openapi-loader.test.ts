@@ -150,4 +150,59 @@ describe("OpenapiLoader", () => {
     const cachedRaw = fs.readFileSync(profile.openapiSpecCache, "utf-8");
     expect(JSON.parse(cachedRaw)).toEqual(sourceSpec);
   });
+
+  it("loads YAML spec from local file path", async () => {
+    const yamlContent = `openapi: "3.0.0"\ninfo:\n  title: YAML API\n  version: "1.0.0"\npaths:\n  /test:\n    get:\n      summary: Test endpoint\n`;
+
+    const profile: Profile = {
+      ...baseProfile,
+      openapiSpecSource: "/project/openapi.yaml",
+    };
+
+    const fs = new MemoryFs({
+      [profile.openapiSpecSource]: yamlContent,
+    });
+
+    const loader = new OpenapiLoader({ fs });
+    const loaded = await loader.loadSpec(profile, { refresh: true }) as Record<string, unknown>;
+
+    expect((loaded as any).openapi).toBe("3.0.0");
+    expect((loaded as any).info.title).toBe("YAML API");
+    expect((loaded as any).paths["/test"].get.summary).toBe("Test endpoint");
+  });
+
+  it("loads YAML spec from HTTP URL", async () => {
+    const yamlContent = `openapi: "3.0.0"\ninfo:\n  title: Remote YAML\n  version: "2.0"\npaths: {}`;
+    mockedAxios.get.mockResolvedValueOnce({ data: yamlContent });
+
+    const profile: Profile = {
+      ...baseProfile,
+      openapiSpecSource: "https://example.com/spec.yaml",
+    };
+
+    const fs = new MemoryFs();
+    const loader = new OpenapiLoader({ fs });
+    const loaded = await loader.loadSpec(profile, { refresh: true }) as Record<string, unknown>;
+
+    expect((loaded as any).openapi).toBe("3.0.0");
+    expect((loaded as any).info.title).toBe("Remote YAML");
+  });
+
+  it("auto-detects YAML content even without .yaml extension", async () => {
+    const yamlContent = `openapi: "3.0.0"\ninfo:\n  title: Auto Detect\n  version: "1.0"\npaths: {}`;
+
+    const profile: Profile = {
+      ...baseProfile,
+      openapiSpecSource: "/project/spec.txt",
+    };
+
+    const fs = new MemoryFs({
+      [profile.openapiSpecSource]: yamlContent,
+    });
+
+    const loader = new OpenapiLoader({ fs });
+    const loaded = await loader.loadSpec(profile, { refresh: true }) as Record<string, unknown>;
+
+    expect((loaded as any).info.title).toBe("Auto Detect");
+  });
 });
