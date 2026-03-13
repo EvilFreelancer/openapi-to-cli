@@ -378,7 +378,7 @@ describe("cli", () => {
     });
 
     const out = log.join("");
-    expect(out).toContain("messages_get");
+    expect(out).toContain("messages  List messages");
     expect(out).not.toContain("status");
   });
 
@@ -431,7 +431,7 @@ describe("cli", () => {
     });
 
     const out = log.join("");
-    expect(out).toContain("messages_get");
+    expect(out).toContain("messages  List messages");
     expect(out).not.toContain("status");
   });
 
