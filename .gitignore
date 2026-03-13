@@ -10,3 +10,5 @@ package-lock.json
 tests/**/*.js
 tests/**/*.d.ts
 .ocli/
+tests/fixtures/*.json
+tests/fixtures/*.yaml
