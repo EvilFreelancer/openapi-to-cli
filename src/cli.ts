@@ -8,6 +8,7 @@ import { ConfigLocator } from "./config";
 import { ProfileStore, Profile } from "./profile-store";
 import { OpenapiLoader } from "./openapi-loader";
 import { OpenapiToCommands, CliCommand, CliCommandOption } from "./openapi-to-commands";
+import { CommandSearch } from "./command-search";
 import { VERSION } from "./version";
 
 export interface HttpClient {
@@ -297,7 +298,7 @@ export async function run(argv: string[], options?: RunOptions): Promise<void> {
       .option("include-endpoints", { type: "string", default: "" })
       .option("exclude-endpoints", { type: "string", default: "" });
 
-  const staticCommands = new Set(["onboard", "profiles", "use", "commands", "help", "--help", "-h", "--version"]);
+  const staticCommands = new Set(["onboard", "profiles", "use", "commands", "search", "help", "--help", "-h", "--version"]);
 
   if (argv.length > 0 && !staticCommands.has(argv[0])) {
     const [toolName, ...rest] = argv;
@@ -399,6 +400,69 @@ export async function run(argv: string[], options?: RunOptions): Promise<void> {
           const namePadded = cmd.name.padEnd(padding, " ");
           stdout(`  ${namePadded}${description}\n`);
         });
+      }
+    )
+    .command(
+      "search",
+      "Search commands by query (BM25) or regex pattern",
+      (y) =>
+        y
+          .version(false)
+          .option("query", {
+            alias: "q",
+            type: "string",
+            description: "Natural language search query",
+          })
+          .option("regex", {
+            alias: "r",
+            type: "string",
+            description: "Regex pattern to match command name, path, or description",
+          })
+          .option("limit", {
+            alias: "n",
+            type: "number",
+            default: 10,
+            description: "Maximum number of results",
+          })
+          .check((args) => {
+            if (!args.query && !args.regex) {
+              throw new Error("Provide --query or --regex");
+            }
+            return true;
+          }),
+      async (args) => {
+        const profile = profileStore.getCurrentProfile(cwd);
+        if (!profile) {
+          throw new Error("No current profile configured");
+        }
+
+        const spec = await openapiLoader.loadSpec(profile);
+        const commands = openapiToCommands.buildCommands(spec, profile);
+
+        const searcher = new CommandSearch();
+        searcher.load(commands);
+
+        const limit = (args.limit as number) ?? 10;
+        const results = args.query
+          ? searcher.search(args.query as string, limit)
+          : searcher.searchRegex(args.regex as string, limit);
+
+        if (results.length === 0) {
+          stdout("No commands found.\n");
+          return;
+        }
+
+        const maxName = results.reduce((m, r) => (r.name.length > m ? r.name.length : m), 0);
+        const maxMethod = results.reduce((m, r) => (r.method.length > m ? r.method.length : m), 0);
+
+        stdout(`Found ${results.length} command(s):\n\n`);
+        for (const r of results) {
+          const name = r.name.padEnd(maxName + 2);
+          const method = r.method.padEnd(maxMethod + 1);
+          const desc = r.description ?? "";
+          const scorePart = r.score < 1 ? ` [score: ${r.score}]` : "";
+          stdout(`  ${name}${method} ${r.path}  ${desc}${scorePart}\n`);
+        }
       }
     )
     .demandCommand(1, "")
