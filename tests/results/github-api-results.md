@@ -126,7 +126,7 @@ ocli repos_owner_repo_get
 
 Get a repository
 
-Опции:
+Options:
 
-  -h, --help  Показать помощь  [булевый тип]
+  -h, --help  Show help  [boolean]
 ```

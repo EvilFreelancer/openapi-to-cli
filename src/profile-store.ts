@@ -13,6 +13,8 @@ export interface Profile {
   openapiSpecCache: string;
   includeEndpoints: string[];
   excludeEndpoints: string[];
+  commandPrefix: string;
+  customHeaders: Record<string, string>;
 }
 
 interface FileSystemExtended {
@@ -71,6 +73,27 @@ export class ProfileStore {
       .map((value) => value.trim())
       .filter((value) => value.length > 0);
 
+    const customHeadersRaw = section.custom_headers ?? "";
+    const customHeaders: Record<string, string> = {};
+    if (customHeadersRaw) {
+      const trimmed = customHeadersRaw.trim();
+      if (trimmed.startsWith("{")) {
+        try {
+          Object.assign(customHeaders, JSON.parse(trimmed));
+        } catch { /* ignore malformed JSON */ }
+      } else {
+        // Legacy comma-separated format: Key:Value,Key2:Value2
+        trimmed.split(",").forEach((pair: string) => {
+          const colonIdx = pair.indexOf(":");
+          if (colonIdx > 0) {
+            const key = pair.slice(0, colonIdx).trim();
+            const value = pair.slice(colonIdx + 1).trim();
+            if (key) customHeaders[key] = value;
+          }
+        });
+      }
+    }
+
     return {
       name,
       apiBaseUrl: section.api_base_url ?? "",
@@ -80,6 +103,8 @@ export class ProfileStore {
       openapiSpecCache: section.openapi_spec_cache ?? "",
       includeEndpoints,
       excludeEndpoints,
+      commandPrefix: section.command_prefix ?? "",
+      customHeaders,
     };
   }
 
@@ -122,6 +147,10 @@ export class ProfileStore {
     const iniData = this.readIni(cwd);
 
     const sectionName = profile.name;
+    const customHeadersStr = Object.keys(profile.customHeaders).length > 0
+      ? JSON.stringify(profile.customHeaders)
+      : "";
+
     iniData[sectionName] = {
       api_base_url: profile.apiBaseUrl,
       api_basic_auth: profile.apiBasicAuth,
@@ -130,6 +159,8 @@ export class ProfileStore {
       openapi_spec_cache: profile.openapiSpecCache,
       include_endpoints: profile.includeEndpoints.join(","),
       exclude_endpoints: profile.excludeEndpoints.join(","),
+      command_prefix: profile.commandPrefix,
+      custom_headers: customHeadersStr,
     };
 
     const serialized = ini.encode(iniData);

@@ -17,6 +17,8 @@ const profile: Profile = {
   openapiSpecCache: "",
   includeEndpoints: [],
   excludeEndpoints: [],
+  commandPrefix: "",
+  customHeaders: {},
 };
 
 const describeIfFixture = fixtureExists ? describe : describe.skip;

@@ -45,6 +45,8 @@ When an agent has access to 200+ API endpoints, loading all of them as MCP tools
 | Non-HTTP integrations (desktop apps) | ❌ | ❌ | ✅ |
 | Session management / undo-redo | ❌ | ❌ | ✅ |
 | JSON structured output | ❌ | ✅ | ✅ |
+| Custom HTTP headers | ✅ | ❌ | ❌ |
+| Command name prefix | ✅ | ❌ | ❌ |
 | Basic / Bearer auth | ✅ | ✅ | ❌ |
 | OAuth2 / Auth0 | ❌ | ✅ | ✅ |
 | Response JMESPath filtering | ❌ | ✅ | ❌ |
@@ -63,7 +65,9 @@ ocli profiles add myapi \
   --openapi-spec http://127.0.0.1:2222/openapi.json \
   --api-bearer-token "..." \
   --include-endpoints get:/messages,get:/channels \
-  --exclude-endpoints post:/admin/secret
+  --exclude-endpoints post:/admin/secret \
+  --command-prefix "myapi_" \
+  --custom-headers '{"X-Tenant":"acme","X-Request-Source":"cli"}'
 ```
 
 Alternatively, `ocli onboard` (with the same options, no profile name) creates a profile named `default`.
@@ -103,6 +107,64 @@ ocli commands -r "messages" -n 3
 ```
 
 The BM25 engine (ported from [picoclaw](https://github.com/sipeed/picoclaw)) ranks commands by relevance across name, method, path, description, and parameter names. This enables agents to discover the right endpoint without loading all command schemas into context. The legacy `ocli search` command is kept as a deprecated alias and internally forwards to `ocli commands` with the same flags.
+
+### Benchmark: three strategies for AI agent ↔ API interaction
+
+Tested against [Swagger Petstore](https://petstore3.swagger.io/) ([OpenAPI spec](https://petstore3.swagger.io/api/v3/openapi.json)). Scaling projections use the [GitHub API](https://api.apis.guru/v2/specs/github.com/api.github.com/1.1.4/openapi.json) (845 endpoints).
+
+Three strategies compared:
+
+| # | Strategy | How it works | Tools in context |
+|---|----------|-------------|-----------------|
+| 1 | **MCP Naive** | All endpoints as MCP tools | N tools (one per endpoint) |
+| 2 | **MCP+Search** | 2 tools: `search_tools` + `call_api` | 2 tools |
+| 3 | **CLI (ocli)** | 1 tool: `execute_command` | 1 tool |
+
+Run the benchmark yourself:
+
+```bash
+npx ts-node benchmarks/benchmark.ts
+```
+
+Results (19 endpoints, 15 natural-language queries):
+
+```
+  TOOL DEFINITION OVERHEAD (sent with every API request)
+
+  MCP Naive     ██████████████████████████████  2 945 tok  (19 tools)
+  MCP+Search    ████    346 tok  (2 tools)
+  CLI (ocli)    █    138 tok  (1 tool)
+
+  SEARCH RESULT SIZE (3 matching endpoints)
+
+  MCP+Search    ██████████████████████████████    995 tok  (full JSON schemas)
+  CLI (ocli)    ██     67 tok  (name + method + path)
+
+  SCALING: OVERHEAD PER TURN vs ENDPOINT COUNT
+
+  Endpoints   MCP Naive      MCP+Search     CLI (ocli)     Naive/CLI
+     19          2 945 tok       346 tok       138 tok     21x ← Petstore
+    100         15 415 tok       346 tok       138 tok    112x
+    845        130 106 tok       346 tok       138 tok    943x ← GitHub API
+
+  VERDICT
+
+                 Overhead/turn    Search result    Accuracy     Server?
+  MCP Naive       2 945 tok       N/A              100%         Yes
+  MCP+Search        346 tok         995 tok/query     93%        Yes
+  CLI (ocli)        138 tok          67 tok/query     93%        No
+
+  Monthly cost (845 endpoints, 100 tasks/day, Claude Sonnet $3/M input):
+  MCP Naive    $1 172/month
+  MCP+Search   $   92/month
+  CLI (ocli)   $    4/month
+```
+
+Key insights:
+- **MCP Naive** is simple but scales terribly (130K tokens at 845 endpoints).
+- **MCP+Search** fixes the overhead but search results carry full JSON schemas — 15x larger than CLI text output.
+- **CLI** returns compact text, needs no MCP server, and works with any agent that has shell access.
+- Both search approaches share the same BM25 accuracy (93% top-3). The 7% miss is recoverable — the agent retries with a different query.
 
 ### Installation and usage via npm and npx
 
@@ -228,7 +290,9 @@ The `ocli` binary provides the following core commands:
   - `--api-basic-auth <user:pass>` - optional;
   - `--api-bearer-token <token>` - optional;
   - `--include-endpoints <list>` - comma-separated `method:path`;
-  - `--exclude-endpoints <list>` - comma-separated `method:path`.
+  - `--exclude-endpoints <list>` - comma-separated `method:path`;
+  - `--command-prefix <prefix>` - prefix for command names (e.g. `api_` -> `api_messages`, `api_users`);
+  - `--custom-headers <json>` - custom HTTP headers as JSON string (e.g. `'{"X-Tenant":"acme","X-Request-Source":"cli"}'`). Legacy comma-separated `key:value` format is also supported for simple values without commas.
 
 - `ocli profiles add <name>` - add a new profile with the given name and cache the OpenAPI spec. Same options as `onboard` (profile name is the positional argument).
 
@@ -270,6 +334,19 @@ The project mirrors parts of the `openapi-to-mcp` architecture but implements a 
 - `command-search` - BM25 and regex search over generated commands for discovery on large API surfaces.
 - `bm25` - generic BM25 ranking engine with Robertson IDF smoothing and min-heap top-K extraction.
 - `cli` - entry point, argument parser, command registration, help output.
+
+### Using with AI agents (Claude Code skill example)
+
+An example skill file is provided in [`examples/skill-ocli-api.md`](examples/skill-ocli-api.md). Copy it to `.claude/skills/api.md` in your project to let Claude Code discover and use your API via `ocli`:
+
+```bash
+cp examples/skill-ocli-api.md .claude/skills/api.md
+```
+
+The agent workflow:
+1. `ocli commands --query "upload file"` — discover the right command
+2. `ocli files_content_post --help` — check parameters
+3. `ocli files_content_post --file ./data.csv` — execute
 
 ### Similar projects
 

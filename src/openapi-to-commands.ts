@@ -54,7 +54,16 @@ export class OpenapiToCommands {
     }
 
     const filtered = this.applyFilters(operations, profile);
-    return this.toCliCommands(filtered, methodsByPath);
+    const commands = this.toCliCommands(filtered, methodsByPath);
+
+    const prefix = profile.commandPrefix;
+    if (prefix) {
+      for (const cmd of commands) {
+        cmd.name = `${prefix}${cmd.name}`;
+      }
+    }
+
+    return commands;
   }
 
   private collectOperations(spec: OpenapiSpecLike): PathOperation[] {
@@ -150,7 +159,7 @@ export class OpenapiToCommands {
       result.push({
         name: param.name,
         location: param.in,
-        required: Boolean(param.required),
+        required: param.in === "path" ? true : Boolean(param.required),
         schemaType: param.schema?.type,
         description: param.description,
       });
