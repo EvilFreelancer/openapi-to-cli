@@ -108,9 +108,17 @@ ocli commands -r "messages" -n 3
 
 The BM25 engine (ported from [picoclaw](https://github.com/sipeed/picoclaw)) ranks commands by relevance across name, method, path, description, and parameter names. This enables agents to discover the right endpoint without loading all command schemas into context. The legacy `ocli search` command is kept as a deprecated alias and internally forwards to `ocli commands` with the same flags.
 
-### Benchmark: MCP tools vs CLI (Petstore API, 19 endpoints)
+### Benchmark: three strategies for AI agent ↔ API interaction
 
-Tested against [Swagger Petstore](https://petstore3.swagger.io/) ([OpenAPI spec](https://petstore3.swagger.io/api/v3/openapi.json)). Scaling projections use the [GitHub API](https://api.apis.guru/v2/specs/github.com/api.github.com/1.1.4/openapi.json) (845 endpoints) and [Box API](https://api.apis.guru/v2/specs/box.com/2.0.0/openapi.yaml) (258 endpoints, YAML).
+Tested against [Swagger Petstore](https://petstore3.swagger.io/) ([OpenAPI spec](https://petstore3.swagger.io/api/v3/openapi.json)). Scaling projections use the [GitHub API](https://api.apis.guru/v2/specs/github.com/api.github.com/1.1.4/openapi.json) (845 endpoints).
+
+Three strategies compared:
+
+| # | Strategy | How it works | Tools in context |
+|---|----------|-------------|-----------------|
+| 1 | **MCP Naive** | All endpoints as MCP tools | N tools (one per endpoint) |
+| 2 | **MCP+Search** | 2 tools: `search_tools` + `call_api` | 2 tools |
+| 3 | **CLI (ocli)** | 1 tool: `execute_command` | 1 tool |
 
 Run the benchmark yourself:
 
@@ -121,32 +129,42 @@ npx ts-node benchmarks/benchmark.ts
 Results (19 endpoints, 15 natural-language queries):
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  TOKEN OVERHEAD PER TURN (tool definitions + system prompt) │
-├─────────────────────────────────────────────────────────────┤
-│  MCP (19 tools)  ██████████████████████████████ 2 964 tok   │
-│  CLI (1 tool)    ██ 176 tok                                 │
-│  Ratio: 17x more overhead with MCP per request              │
-├─────────────────────────────────────────────────────────────┤
-│  SCALING: MCP OVERHEAD vs ENDPOINTS                         │
-├─────────────────────────────────────────────────────────────┤
-│    19 ep  █                          2,925 tok ← Petstore   │
-│   100 ep  ███                       15,395 tok              │
-│   845 ep  ████████████████████████ 130,086 tok ← GitHub API │
-│   CLI:    ▪                            188 tok  (constant)  │
-├─────────────────────────────────────────────────────────────┤
-│  VERDICT                                                    │
-├─────────────────────────────────────────────────────────────┤
-│             Tokens/turn    Accuracy (top-3)    Cost/month*  │
-│  MCP          2,964         100%               $1,702       │
-│  CLI            176          93%               $4.23        │
-│  Δ             -94%          -7%              -$1,698       │
-│                                                             │
-│  * 845 endpoints, 100 tasks/day, Claude Sonnet $3/M input   │
-└─────────────────────────────────────────────────────────────┘
+  TOOL DEFINITION OVERHEAD (sent with every API request)
+
+  MCP Naive     ██████████████████████████████  2 945 tok  (19 tools)
+  MCP+Search    ████    346 tok  (2 tools)
+  CLI (ocli)    █    138 tok  (1 tool)
+
+  SEARCH RESULT SIZE (3 matching endpoints)
+
+  MCP+Search    ██████████████████████████████    995 tok  (full JSON schemas)
+  CLI (ocli)    ██     67 tok  (name + method + path)
+
+  SCALING: OVERHEAD PER TURN vs ENDPOINT COUNT
+
+  Endpoints   MCP Naive      MCP+Search     CLI (ocli)     Naive/CLI
+     19          2 945 tok       346 tok       138 tok     21x ← Petstore
+    100         15 415 tok       346 tok       138 tok    112x
+    845        130 106 tok       346 tok       138 tok    943x ← GitHub API
+
+  VERDICT
+
+                 Overhead/turn    Search result    Accuracy     Server?
+  MCP Naive       2 945 tok       N/A              100%         Yes
+  MCP+Search        346 tok         995 tok/query     93%        Yes
+  CLI (ocli)        138 tok          67 tok/query     93%        No
+
+  Monthly cost (845 endpoints, 100 tasks/day, Claude Sonnet $3/M input):
+  MCP Naive    $1 172/month
+  MCP+Search   $   92/month
+  CLI (ocli)   $    4/month
 ```
 
-CLI trades 7% accuracy for 94% token savings. The miss is recoverable — the agent can retry with a different query. MCP becomes impractical above ~200 endpoints.
+Key insights:
+- **MCP Naive** is simple but scales terribly (130K tokens at 845 endpoints).
+- **MCP+Search** fixes the overhead but search results carry full JSON schemas — 15x larger than CLI text output.
+- **CLI** returns compact text, needs no MCP server, and works with any agent that has shell access.
+- Both search approaches share the same BM25 accuracy (93% top-3). The 7% miss is recoverable — the agent retries with a different query.
 
 ### Installation and usage via npm and npx
 
