@@ -600,7 +600,7 @@ describe("cli", () => {
       "include_endpoints = ",
       "exclude_endpoints = ",
       "command_prefix = ",
-      "custom_headers = X-Custom-Id:abc123,X-Tenant:myorg",
+      'custom_headers = {"X-Custom-Id":"abc123","X-Tenant":"myorg"}',
       "",
     ].join("\n");
 

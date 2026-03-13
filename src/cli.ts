@@ -282,14 +282,24 @@ export async function run(argv: string[], options?: RunOptions): Promise<void> {
 
     const customHeaders: Record<string, string> = {};
     if (args["custom-headers"]) {
-      args["custom-headers"].split(",").forEach((pair) => {
-        const colonIdx = pair.indexOf(":");
-        if (colonIdx > 0) {
-          const key = pair.slice(0, colonIdx).trim();
-          const value = pair.slice(colonIdx + 1).trim();
-          if (key) customHeaders[key] = value;
+      const raw = args["custom-headers"].trim();
+      if (raw.startsWith("{")) {
+        try {
+          Object.assign(customHeaders, JSON.parse(raw));
+        } catch {
+          throw new Error("Invalid --custom-headers JSON. Expected format: '{\"Key\":\"Value\"}'");
         }
-      });
+      } else {
+        // Legacy comma-separated format: Key:Value,Key2:Value2
+        raw.split(",").forEach((pair) => {
+          const colonIdx = pair.indexOf(":");
+          if (colonIdx > 0) {
+            const key = pair.slice(0, colonIdx).trim();
+            const value = pair.slice(colonIdx + 1).trim();
+            if (key) customHeaders[key] = value;
+          }
+        });
+      }
     }
 
     const profile: Profile = {
@@ -318,7 +328,7 @@ export async function run(argv: string[], options?: RunOptions): Promise<void> {
       .option("include-endpoints", { type: "string", default: "" })
       .option("exclude-endpoints", { type: "string", default: "" })
       .option("command-prefix", { type: "string", default: "", description: "Prefix for command names (e.g. api_ -> api_messages)" })
-      .option("custom-headers", { type: "string", default: "", description: "Custom headers as comma-separated key:value pairs" });
+      .option("custom-headers", { type: "string", default: "", description: "Custom headers as JSON string, e.g. '{\"X-Tenant\":\"acme\"}'" });
 
   const staticCommands = new Set(["onboard", "profiles", "use", "commands", "search", "help", "--help", "-h", "--version"]);
 

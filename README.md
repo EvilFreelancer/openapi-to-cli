@@ -67,7 +67,7 @@ ocli profiles add myapi \
   --include-endpoints get:/messages,get:/channels \
   --exclude-endpoints post:/admin/secret \
   --command-prefix "myapi_" \
-  --custom-headers "X-Tenant:acme,X-Request-Source:cli"
+  --custom-headers '{"X-Tenant":"acme","X-Request-Source":"cli"}'
 ```
 
 Alternatively, `ocli onboard` (with the same options, no profile name) creates a profile named `default`.
@@ -292,7 +292,7 @@ The `ocli` binary provides the following core commands:
   - `--include-endpoints <list>` - comma-separated `method:path`;
   - `--exclude-endpoints <list>` - comma-separated `method:path`;
   - `--command-prefix <prefix>` - prefix for command names (e.g. `api_` -> `api_messages`, `api_users`);
-  - `--custom-headers <list>` - custom HTTP headers as comma-separated `key:value` pairs (e.g. `X-Tenant:acme,X-Request-Source:cli`).
+  - `--custom-headers <json>` - custom HTTP headers as JSON string (e.g. `'{"X-Tenant":"acme","X-Request-Source":"cli"}'`). Legacy comma-separated `key:value` format is also supported for simple values without commas.
 
 - `ocli profiles add <name>` - add a new profile with the given name and cache the OpenAPI spec. Same options as `onboard` (profile name is the positional argument).
 
