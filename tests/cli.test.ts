@@ -576,6 +576,180 @@ describe("cli", () => {
     expect(out).toContain('"ok": true');
   });
 
+  // --- Body flag JSON parsing tests ---
+
+  function createPostApiDeps() {
+    const localDir = `${cwd}/.ocli`;
+    const profilesPath = `${localDir}/profiles.ini`;
+    const cachePath = `${localDir}/specs/body-api.json`;
+
+    const spec = {
+      openapi: "3.0.0",
+      paths: {
+        "/{org_slug}/{repo_slug}/ci/workflows/{workflow_name}/trigger": {
+          post: {
+            summary: "Trigger workflow",
+            parameters: [
+              { name: "org_slug", in: "path", required: true, schema: { type: "string" } },
+              { name: "repo_slug", in: "path", required: true, schema: { type: "string" } },
+              { name: "workflow_name", in: "path", required: true, schema: { type: "string" } },
+            ],
+          },
+        },
+      },
+    };
+
+    const iniContent = [
+      "[body-api]",
+      "api_base_url = https://api.example.com",
+      "api_basic_auth = ",
+      "api_bearer_token = tok",
+      "openapi_spec_source = /spec.json",
+      `openapi_spec_cache = ${cachePath}`,
+      "include_endpoints = ",
+      "exclude_endpoints = ",
+      "",
+    ].join("\n");
+
+    const capturedConfigs: unknown[] = [];
+    const fakeHttpClient: HttpClient = {
+      request: async (config: any) => {
+        capturedConfigs.push(config);
+        return { status: 200, statusText: "OK", headers: {}, config, data: { ok: true } };
+      },
+    };
+
+    const { profileStore, openapiLoader } = createCliDeps(cwd, homeDir, {
+      [profilesPath]: iniContent,
+      [cachePath]: JSON.stringify(spec),
+      [`${localDir}/current`]: "body-api",
+    });
+
+    return { profileStore, openapiLoader, fakeHttpClient, capturedConfigs };
+  }
+
+  it("parses JSON object body flags before sending request", async () => {
+    const { profileStore, openapiLoader, fakeHttpClient, capturedConfigs } = createPostApiDeps();
+
+    await run(
+      [
+        "org_slug_repo_slug_ci_workflows_workflow_name_trigger",
+        "--org_slug", "myorg",
+        "--repo_slug", "myrepo",
+        "--workflow_name", "deploy",
+        "--revision", "main",
+        "--workflow_revision", "main",
+        "--input", '{"values":[{"name":"FOO","value":"bar"}]}',
+      ],
+      { cwd, profileStore, openapiLoader, httpClient: fakeHttpClient, stdout: () => {} }
+    );
+
+    expect(capturedConfigs).toHaveLength(1);
+    const config = capturedConfigs[0] as { data: Record<string, unknown> };
+    expect(config.data).toEqual({
+      revision: "main",
+      workflow_revision: "main",
+      input: {
+        values: [{ name: "FOO", value: "bar" }],
+      },
+    });
+  });
+
+  it("parses boolean body flags before sending request", async () => {
+    const { profileStore, openapiLoader, fakeHttpClient, capturedConfigs } = createPostApiDeps();
+
+    await run(
+      [
+        "org_slug_repo_slug_ci_workflows_workflow_name_trigger",
+        "--org_slug", "myorg",
+        "--repo_slug", "myrepo",
+        "--workflow_name", "deploy",
+        "--shared", "true",
+        "--draft", "false",
+      ],
+      { cwd, profileStore, openapiLoader, httpClient: fakeHttpClient, stdout: () => {} }
+    );
+
+    expect(capturedConfigs).toHaveLength(1);
+    const config = capturedConfigs[0] as { data: Record<string, unknown> };
+    expect(config.data.shared).toBe(true);
+    expect(config.data.draft).toBe(false);
+  });
+
+  it("parses null body flags before sending request", async () => {
+    const { profileStore, openapiLoader, fakeHttpClient, capturedConfigs } = createPostApiDeps();
+
+    await run(
+      [
+        "org_slug_repo_slug_ci_workflows_workflow_name_trigger",
+        "--org_slug", "myorg",
+        "--repo_slug", "myrepo",
+        "--workflow_name", "deploy",
+        "--description", "null",
+      ],
+      { cwd, profileStore, openapiLoader, httpClient: fakeHttpClient, stdout: () => {} }
+    );
+
+    expect(capturedConfigs).toHaveLength(1);
+    const config = capturedConfigs[0] as { data: Record<string, unknown> };
+    expect(config.data.description).toBeNull();
+  });
+
+  it("parses JSON array body flags before sending request", async () => {
+    const { profileStore, openapiLoader, fakeHttpClient, capturedConfigs } = createPostApiDeps();
+
+    await run(
+      [
+        "org_slug_repo_slug_ci_workflows_workflow_name_trigger",
+        "--org_slug", "myorg",
+        "--repo_slug", "myrepo",
+        "--workflow_name", "deploy",
+        "--tags", '["ci","deploy"]',
+      ],
+      { cwd, profileStore, openapiLoader, httpClient: fakeHttpClient, stdout: () => {} }
+    );
+
+    expect(capturedConfigs).toHaveLength(1);
+    const config = capturedConfigs[0] as { data: Record<string, unknown> };
+    expect(config.data.tags).toEqual(["ci", "deploy"]);
+  });
+
+  it("preserves plain string body flags", async () => {
+    const { profileStore, openapiLoader, fakeHttpClient, capturedConfigs } = createPostApiDeps();
+
+    await run(
+      [
+        "org_slug_repo_slug_ci_workflows_workflow_name_trigger",
+        "--org_slug", "myorg",
+        "--repo_slug", "myrepo",
+        "--workflow_name", "deploy",
+        "--revision", "main",
+      ],
+      { cwd, profileStore, openapiLoader, httpClient: fakeHttpClient, stdout: () => {} }
+    );
+
+    expect(capturedConfigs).toHaveLength(1);
+    const config = capturedConfigs[0] as { data: Record<string, unknown> };
+    expect(config.data.revision).toBe("main");
+  });
+
+  it("throws on invalid JSON-like body flags", async () => {
+    const { profileStore, openapiLoader, fakeHttpClient } = createPostApiDeps();
+
+    await expect(
+      run(
+        [
+          "org_slug_repo_slug_ci_workflows_workflow_name_trigger",
+          "--org_slug", "myorg",
+          "--repo_slug", "myrepo",
+          "--workflow_name", "deploy",
+          "--input", '{"values":',
+        ],
+        { cwd, profileStore, openapiLoader, httpClient: fakeHttpClient, stdout: () => {} }
+      )
+    ).rejects.toThrow("Invalid JSON body value");
+  });
+
   it("sends custom headers from profile in API requests", async () => {
     const localDir = `${cwd}/.ocli`;
     const profilesPath = `${localDir}/profiles.ini`;
