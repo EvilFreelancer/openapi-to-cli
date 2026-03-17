@@ -34,7 +34,7 @@ const defaultHttpClient: HttpClient = {
 };
 
 interface AddProfileArgs {
-  "api-base-url": string;
+  "api-base-url"?: string;
   "openapi-spec": string;
   "api-basic-auth"?: string;
   "api-bearer-token"?: string;
@@ -530,7 +530,7 @@ export async function run(argv: string[], options?: RunOptions): Promise<void> {
 
     const profile: Profile = {
       name: profileName,
-      apiBaseUrl: args["api-base-url"],
+      apiBaseUrl: args["api-base-url"] ?? "",
       apiBasicAuth: args["api-basic-auth"] ?? "",
       apiBearerToken: args["api-bearer-token"] ?? "",
       openapiSpecSource: args["openapi-spec"],
@@ -541,7 +541,11 @@ export async function run(argv: string[], options?: RunOptions): Promise<void> {
       customHeaders,
     };
 
-    await openapiLoader.loadSpec(profile, { refresh: true });
+    const spec = await openapiLoader.loadSpec(profile, { refresh: true });
+    profile.apiBaseUrl = profile.apiBaseUrl || deriveApiBaseUrlFromSpec(spec);
+    if (!profile.apiBaseUrl) {
+      throw new Error("Unable to determine API base URL. Provide --api-base-url explicitly.");
+    }
     profileStore.saveProfile(cwd, profile, { makeCurrent: true });
   };
 
