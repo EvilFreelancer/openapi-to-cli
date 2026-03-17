@@ -342,7 +342,7 @@ The project mirrors parts of the `openapi-to-mcp` architecture but implements a 
 
 #### OpenClaw skill
 
-Install the [OpenClaw](https://github.com/openclaw/openclaw) skill from ClawHub:
+Install the [ocli-api](https://clawhub.ai/skills/ocli-api) skill from [ClawHub](https://clawhub.ai):
 
 ```bash
 clawhub install ocli-api
