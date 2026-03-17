@@ -8,6 +8,9 @@ export interface CliCommandOption {
   required: boolean;
   schemaType?: string;
   description?: string;
+  style?: string;
+  explode?: boolean;
+  collectionFormat?: string;
 }
 
 export interface CliCommand {
@@ -17,6 +20,7 @@ export interface CliCommand {
   options: CliCommandOption[];
   description?: string;
   requestContentType?: string;
+  serverUrl?: string;
 }
 
 type HttpMethod = "get" | "post" | "put" | "delete" | "patch" | "head" | "options" | "trace";
@@ -28,12 +32,14 @@ interface PathOperation {
   path: string;
   method: HttpMethod;
   pathParameters?: unknown[];
+  pathServers?: unknown[];
   operation: {
     summary?: string;
     description?: string;
     parameters?: unknown[];
     requestBody?: unknown;
     consumes?: string[];
+    servers?: unknown[];
   };
 }
 
@@ -44,6 +50,9 @@ interface ParameterLike {
   schema?: SchemaLike;
   type?: string;
   description?: string;
+  style?: string;
+  explode?: boolean;
+  collectionFormat?: string;
 }
 
 interface SchemaLike {
@@ -58,6 +67,11 @@ interface SchemaLike {
 interface RequestBodyLike {
   required?: boolean;
   content?: Record<string, { schema?: SchemaLike }>;
+}
+
+interface ServerLike {
+  url?: string;
+  variables?: Record<string, { default?: string }>;
 }
 
 export class OpenapiToCommands {
@@ -94,6 +108,7 @@ export class OpenapiToCommands {
     for (const pathKey of Object.keys(paths)) {
       const pathItem = paths[pathKey];
       const pathParameters = Array.isArray(pathItem?.parameters) ? pathItem.parameters : [];
+      const pathServers = Array.isArray(pathItem?.servers) ? pathItem.servers : [];
       for (const method of methods) {
         const op = pathItem[method];
         if (op) {
@@ -101,6 +116,7 @@ export class OpenapiToCommands {
             path: pathKey,
             method,
             pathParameters,
+            pathServers,
             operation: op,
           });
         }
@@ -158,6 +174,7 @@ export class OpenapiToCommands {
         const name = multipleMethods ? `${baseName}_${op.method}` : baseName;
         const { options, requestContentType } = this.extractOptions(op, spec);
         const description = op.operation.summary ?? op.operation.description;
+        const serverUrl = this.resolveOperationServerUrl(spec, op);
 
         commands.push({
           name,
@@ -166,6 +183,7 @@ export class OpenapiToCommands {
           options,
           description,
           requestContentType,
+          serverUrl,
         });
       }
     }
@@ -214,6 +232,9 @@ export class OpenapiToCommands {
         required: param.in === "path" ? true : Boolean(param.required),
         schemaType: this.getParameterSchemaType(param),
         description: param.description,
+        style: param.style,
+        explode: param.explode,
+        collectionFormat: param.collectionFormat,
       });
     }
 
@@ -416,6 +437,65 @@ export class OpenapiToCommands {
       return param.schema.type;
     }
     return param.type;
+  }
+
+  private resolveOperationServerUrl(spec: OpenapiSpecLike, op: PathOperation): string | undefined {
+    const rootBase = this.resolveServers(Array.isArray(spec?.servers) ? spec.servers : undefined);
+    const operationServer = this.resolveServers(op.operation.servers, rootBase);
+    if (operationServer) {
+      return operationServer;
+    }
+
+    const pathServer = this.resolveServers(op.pathServers, rootBase);
+    if (pathServer) {
+      return pathServer;
+    }
+
+    if (rootBase) {
+      return rootBase;
+    }
+
+    return this.resolveSwagger2BaseUrl(spec);
+  }
+
+  private resolveServers(rawServers?: unknown[], relativeTo?: string): string | undefined {
+    if (!Array.isArray(rawServers) || rawServers.length === 0) {
+      return undefined;
+    }
+
+    const server = this.resolveValue(rawServers[0], {}) as ServerLike;
+    if (!server?.url) {
+      return undefined;
+    }
+
+    let url = server.url;
+    const variables = server.variables ?? {};
+    for (const [name, variable] of Object.entries(variables)) {
+      url = url.replace(new RegExp(`\\{${name}\\}`, "g"), variable.default ?? "");
+    }
+
+    if (/^https?:\/\//i.test(url)) {
+      return url.replace(/\/+$/, "");
+    }
+
+    if (relativeTo) {
+      return new URL(url, relativeTo.endsWith("/") ? relativeTo : `${relativeTo}/`).toString().replace(/\/+$/, "");
+    }
+
+    return undefined;
+  }
+
+  private resolveSwagger2BaseUrl(spec: OpenapiSpecLike): string | undefined {
+    const host = typeof spec?.host === "string" ? spec.host : "";
+    if (!host) {
+      return undefined;
+    }
+
+    const schemes = Array.isArray(spec?.schemes) && spec.schemes.length > 0
+      ? spec.schemes
+      : ["https"];
+    const basePath = typeof spec?.basePath === "string" ? spec.basePath : "";
+    return `${schemes[0]}://${host}${basePath}`.replace(/\/+$/, "");
   }
 
   private pickRequestBodyContentType(requestBody: RequestBodyLike): string | undefined {
