@@ -1,18 +1,20 @@
 #!/usr/bin/env ts-node
 
 /**
- * Token benchmark: 3 strategies for AI agent ↔ API interaction
+ * Token benchmark: 4 strategies for AI agent ↔ API interaction
  *
- * 1. MCP Naive     — all endpoints as tools in context (standard MCP approach)
- * 2. MCP + Search  — 2 tools: search_tools + call_api (smart MCP with tool search)
- * 3. CLI (ocli)    — 1 tool: execute_command (search via `ocli commands --query`)
+ * 1. MCP Naive       — all endpoints as tools in context (standard MCP approach)
+ * 2. MCP+Search Full — 2 tools: search_tools (returns full schemas) + call_api
+ * 3. MCP+Search Compact — 3 tools: search_tools (compact) + get_tool_schema + call_api
+ * 4. CLI (ocli)      — 1 tool: execute_command (search + help + execute)
  *
+ * All search strategies use the same BM25 engine for fair comparison.
  * Tested against Swagger Petstore (19 endpoints).
  * Run: npx ts-node benchmarks/benchmark.ts
  */
 
 import axios from "axios";
-import { OpenapiToCommands } from "../src/openapi-to-commands";
+import { OpenapiToCommands, CliCommand } from "../src/openapi-to-commands";
 import { CommandSearch } from "../src/command-search";
 import { Profile } from "../src/profile-store";
 
@@ -123,13 +125,58 @@ function openapiToMcpTools(spec: Record<string, unknown>): McpTool[] {
   return tools;
 }
 
+// ── BM25 search over MCP tools (same engine as CLI) ─────────────────
+
+interface McpSearchable {
+  tool: McpTool;
+  tokens: string;
+}
+
+function buildMcpSearchIndex(mcpTools: McpTool[]): McpSearchable[] {
+  return mcpTools.map(t => {
+    const propNames = Object.keys((t.input_schema.properties ?? {}) as Record<string, unknown>);
+    return {
+      tool: t,
+      tokens: [t.name, t.description, ...propNames].join(" ").toLowerCase(),
+    };
+  });
+}
+
+/**
+ * BM25-ranked search over MCP tools.
+ * Uses the same CommandSearch engine as CLI for fair comparison.
+ */
+function searchMcpTools(
+  searcher: CommandSearch,
+  mcpToolsByName: Map<string, McpTool>,
+  query: string,
+  limit: number,
+): McpTool[] {
+  const results = searcher.search(query, limit);
+  const matched: McpTool[] = [];
+  for (const r of results) {
+    // Match by operationId or by generated command name
+    const tool = mcpToolsByName.get(r.name) ?? mcpToolsByName.get(r.path);
+    if (tool) matched.push(tool);
+  }
+  // If BM25 didn't find exact matches, fall back to description search
+  if (matched.length === 0) {
+    const q = query.toLowerCase();
+    const scored = Array.from(mcpToolsByName.values())
+      .filter(t => t.name.toLowerCase().includes(q) || t.description.toLowerCase().includes(q))
+      .slice(0, limit);
+    return scored;
+  }
+  return matched;
+}
+
 // ── Tool definitions for each strategy ──────────────────────────────
 
-function buildMcpSearchTools(): McpTool[] {
+function buildMcpSearchFullTools(): McpTool[] {
   return [
     {
       name: "search_tools",
-      description: "Search available API tools by natural language query. Returns matching tools with their full parameter schemas so you can call them.",
+      description: "Search available API tools by natural language query. Returns matching tools with their full parameter schemas so you can call them immediately.",
       input_schema: {
         type: "object",
         properties: {
@@ -154,10 +201,50 @@ function buildMcpSearchTools(): McpTool[] {
   ];
 }
 
+function buildMcpSearchCompactTools(): McpTool[] {
+  return [
+    {
+      name: "search_tools",
+      description: "Search available API tools by natural language query. Returns tool names and descriptions (no parameter schemas).",
+      input_schema: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Natural language search query (e.g. 'create a pet', 'get order status')" },
+          limit: { type: "number", description: "Maximum number of results to return (default: 5)" },
+        },
+        required: ["query"],
+      },
+    },
+    {
+      name: "get_tool_schema",
+      description: "Get the full parameter schema for a specific tool. Use after search_tools to get the parameters before calling.",
+      input_schema: {
+        type: "object",
+        properties: {
+          tool_name: { type: "string", description: "The tool name from search_tools results" },
+        },
+        required: ["tool_name"],
+      },
+    },
+    {
+      name: "call_api",
+      description: "Call an API endpoint by its tool name with parameters. Use get_tool_schema first to discover required parameters.",
+      input_schema: {
+        type: "object",
+        properties: {
+          tool_name: { type: "string", description: "The tool name (e.g. 'addPet', 'getOrderById')" },
+          parameters: { type: "object", description: "Parameters matching the schema from get_tool_schema" },
+        },
+        required: ["tool_name", "parameters"],
+      },
+    },
+  ];
+}
+
 function buildCliTool(): McpTool[] {
   return [{
     name: "execute_command",
-    description: "Execute a shell command. Use `ocli commands --query \"...\"` to search for API commands, then `ocli <command> --param value` to execute.",
+    description: "Execute a shell command. Use `ocli commands --query \"...\"` to search for API commands, then `ocli <command> --help` for parameters, then `ocli <command> --param value` to execute.",
     input_schema: {
       type: "object",
       properties: {
@@ -168,17 +255,19 @@ function buildCliTool(): McpTool[] {
   }];
 }
 
-// ── Simulate search result sizes ────────────────────────────────────
+// ── Simulate search results (all using BM25) ────────────────────────
 
 /**
- * MCP search_tools returns full JSON schemas for matched tools.
- * This is what the agent receives in the tool result — it counts as input tokens
- * on the next turn.
+ * MCP search_tools (full) — returns matched tools with full JSON schemas.
+ * Uses BM25 ranking, same engine as CLI.
  */
-function simulateMcpSearchResult(mcpTools: McpTool[], query: string, limit: number): string {
-  // Simulate: return top `limit` tools with full schemas
-  // In real MCP, the search result includes complete tool definitions
-  const matched = mcpTools.slice(0, limit); // simplified; real search would rank
+function simulateMcpSearchFullResult(
+  searcher: CommandSearch,
+  mcpToolsByName: Map<string, McpTool>,
+  query: string,
+  limit: number,
+): string {
+  const matched = searchMcpTools(searcher, mcpToolsByName, query, limit);
   return JSON.stringify(matched.map(t => ({
     name: t.name,
     description: t.description,
@@ -187,15 +276,66 @@ function simulateMcpSearchResult(mcpTools: McpTool[], query: string, limit: numb
 }
 
 /**
- * CLI search returns compact text: name + method + path + description.
- * Much smaller than full JSON schemas.
+ * MCP search_tools (compact) — returns only names and descriptions.
+ * Same BM25 ranking. Agent must call get_tool_schema separately.
+ */
+function simulateMcpSearchCompactResult(
+  searcher: CommandSearch,
+  mcpToolsByName: Map<string, McpTool>,
+  query: string,
+  limit: number,
+): string {
+  const matched = searchMcpTools(searcher, mcpToolsByName, query, limit);
+  return JSON.stringify(matched.map(t => ({
+    name: t.name,
+    description: t.description,
+  })), null, 2);
+}
+
+/**
+ * MCP get_tool_schema — returns full schema for one tool.
+ */
+function simulateMcpGetSchemaResult(tool: McpTool): string {
+  return JSON.stringify({
+    name: tool.name,
+    description: tool.description,
+    parameters: tool.input_schema,
+  }, null, 2);
+}
+
+/**
+ * CLI search — compact text: name + method + path + description.
+ * Uses the same BM25 engine.
  */
 function simulateCliSearchResult(searcher: CommandSearch, query: string, limit: number): string {
   const results = searcher.search(query, limit);
-  // This is what `ocli commands --query "..."` outputs
   return results.map(r =>
     `  ${r.name.padEnd(35)} ${r.method.padEnd(7)} ${r.path}  ${r.description ?? ""}`
   ).join("\n");
+}
+
+/**
+ * CLI --help — simulates `ocli <command> --help` output.
+ * Returns command description and parameter list (similar to get_tool_schema).
+ * Looks up the full CliCommand to get options.
+ */
+function simulateCliHelpResult(commands: CliCommand[], searcher: CommandSearch, query: string): string {
+  const results = searcher.search(query, 1);
+  if (results.length === 0) return "(no command found)";
+  const matched = results[0];
+  const cmd = commands.find(c => c.name === matched.name);
+  if (!cmd) return "(no command found)";
+  const lines = [
+    `${cmd.name} — ${cmd.description ?? ""}`,
+    `  ${cmd.method.toUpperCase()} ${cmd.path}`,
+    "",
+    "Options:",
+  ];
+  for (const opt of cmd.options) {
+    const req = opt.required ? " (required)" : "";
+    lines.push(`  --${opt.name.padEnd(20)} ${(opt.schemaType ?? "string").padEnd(10)} ${opt.description ?? ""}${req}`);
+  }
+  return lines.join("\n");
 }
 
 // ── Accuracy tasks ──────────────────────────────────────────────────
@@ -231,8 +371,12 @@ async function main(): Promise<void> {
   const response = await axios.get("https://petstore3.swagger.io/api/v3/openapi.json");
   const spec = response.data as Record<string, unknown>;
 
+  // Build MCP tools
   const mcpTools = openapiToMcpTools(spec);
+  const mcpToolsByName = new Map<string, McpTool>();
+  for (const t of mcpTools) mcpToolsByName.set(t.name, t);
 
+  // Build CLI commands + shared BM25 searcher
   const profile: Profile = {
     name: "petstore", apiBaseUrl: "https://petstore3.swagger.io/api/v3",
     apiBasicAuth: "", apiBearerToken: "", openapiSpecSource: "",
@@ -244,38 +388,62 @@ async function main(): Promise<void> {
   const searcher = new CommandSearch();
   searcher.load(commands);
 
+  // Also map CLI command names → MCP tools for cross-referencing
+  for (const cmd of commands) {
+    // Try to find MCP tool by path matching
+    for (const t of mcpTools) {
+      if (!mcpToolsByName.has(cmd.name)) {
+        mcpToolsByName.set(cmd.name, t);
+      }
+    }
+  }
+
   // ── Token calculations for tool definitions (sent every turn) ──
 
   const mcpNaiveToolsJson = JSON.stringify(mcpTools, null, 2);
-  const mcpSearchToolsJson = JSON.stringify(buildMcpSearchTools(), null, 2);
+  const mcpSearchFullToolsJson = JSON.stringify(buildMcpSearchFullTools(), null, 2);
+  const mcpSearchCompactToolsJson = JSON.stringify(buildMcpSearchCompactTools(), null, 2);
   const cliToolJson = JSON.stringify(buildCliTool(), null, 2);
 
   const mcpNaiveToolTokens = estimateTokens(mcpNaiveToolsJson);
-  const mcpSearchToolTokens = estimateTokens(mcpSearchToolsJson);
+  const mcpSearchFullToolTokens = estimateTokens(mcpSearchFullToolsJson);
+  const mcpSearchCompactToolTokens = estimateTokens(mcpSearchCompactToolsJson);
   const cliToolTokens = estimateTokens(cliToolJson);
 
   // System prompts
   const mcpNaiveSystem = "You are an AI assistant with access to the Petstore API. Use the provided tools.";
-  const mcpSearchSystem = "You are an AI assistant. Use search_tools to find API endpoints, then call_api to execute them.";
-  const cliSystem = "You are an AI assistant. Use `ocli commands --query` to search, then `ocli <cmd> --param value` to execute.";
+  const mcpSearchFullSystem = "You are an AI assistant. Use search_tools to find API endpoints (returns full schemas), then call_api to execute them.";
+  const mcpSearchCompactSystem = "You are an AI assistant. Use search_tools to find endpoints, get_tool_schema to get parameters, then call_api to execute.";
+  const cliSystem = "You are an AI assistant. Use `ocli commands --query` to search, `ocli <cmd> --help` for parameters, then `ocli <cmd> --param value` to execute.";
 
   const mcpNaiveSysTok = estimateTokens(mcpNaiveSystem);
-  const mcpSearchSysTok = estimateTokens(mcpSearchSystem);
+  const mcpSearchFullSysTok = estimateTokens(mcpSearchFullSystem);
+  const mcpSearchCompactSysTok = estimateTokens(mcpSearchCompactSystem);
   const cliSysTok = estimateTokens(cliSystem);
 
   const mcpNaiveOverhead = mcpNaiveToolTokens + mcpNaiveSysTok;
-  const mcpSearchOverhead = mcpSearchToolTokens + mcpSearchSysTok;
+  const mcpSearchFullOverhead = mcpSearchFullToolTokens + mcpSearchFullSysTok;
+  const mcpSearchCompactOverhead = mcpSearchCompactToolTokens + mcpSearchCompactSysTok;
   const cliOverhead = cliToolTokens + cliSysTok;
 
-  // ── Search result sizes (carried in conversation history) ──
+  // ── Measure ACTUAL search results using BM25 for all strategies ──
 
-  // Average search result returned to agent (becomes input on next turn)
   const sampleQuery = "find pets by status";
-  const mcpSearchResultSample = simulateMcpSearchResult(mcpTools, sampleQuery, 3);
+
+  const mcpSearchFullResultSample = simulateMcpSearchFullResult(searcher, mcpToolsByName, sampleQuery, 3);
+  const mcpSearchCompactResultSample = simulateMcpSearchCompactResult(searcher, mcpToolsByName, sampleQuery, 3);
   const cliSearchResultSample = simulateCliSearchResult(searcher, sampleQuery, 3);
 
-  const mcpSearchResultTokens = estimateTokens(mcpSearchResultSample);
-  const cliSearchResultTokens = estimateTokens(cliSearchResultSample);
+  // Get schema for one tool (used by compact MCP and CLI --help)
+  const firstMatchedTool = searchMcpTools(searcher, mcpToolsByName, sampleQuery, 1)[0];
+  const mcpGetSchemaResultSample = firstMatchedTool ? simulateMcpGetSchemaResult(firstMatchedTool) : "{}";
+  const cliHelpResultSample = simulateCliHelpResult(commands, searcher, sampleQuery);
+
+  const mcpSearchFullResultTok = estimateTokens(mcpSearchFullResultSample);
+  const mcpSearchCompactResultTok = estimateTokens(mcpSearchCompactResultSample);
+  const mcpGetSchemaResultTok = estimateTokens(mcpGetSchemaResultSample);
+  const cliSearchResultTok = estimateTokens(cliSearchResultSample);
+  const cliHelpResultTok = estimateTokens(cliHelpResultSample);
 
   console.log(`Petstore API: ${mcpTools.length} endpoints\n`);
 
@@ -283,17 +451,20 @@ async function main(): Promise<void> {
   //  OUTPUT
   // ══════════════════════════════════════════════════════════════
 
-  const W = 72;
+  const W = 80;
   const line = "─".repeat(W);
   const dline = "═".repeat(W);
 
   console.log(dline);
-  console.log("  THREE STRATEGIES FOR AI AGENT ↔ API INTERACTION");
+  console.log("  FOUR STRATEGIES FOR AI AGENT ↔ API INTERACTION");
   console.log(dline);
   console.log();
-  console.log("  1. MCP Naive    All endpoints as tools in context");
-  console.log("  2. MCP+Search   2 tools: search_tools + call_api");
-  console.log("  3. CLI (ocli)   1 tool: execute_command");
+  console.log("  1. MCP Naive        All endpoints as tools in context (1 turn)");
+  console.log("  2. MCP+Search Full  search_tools (full schemas) + call_api (2 turns)");
+  console.log("  3. MCP+Search Compact  search_tools (compact) + get_schema + call_api (3 turns)");
+  console.log("  4. CLI (ocli)       search + --help + execute (3 turns)");
+  console.log();
+  console.log("  All search strategies use the same BM25 engine for fair comparison.");
   console.log();
 
   // ── Tool definition overhead ──
@@ -303,61 +474,93 @@ async function main(): Promise<void> {
   console.log();
 
   const maxOvh = mcpNaiveOverhead;
-  console.log(`  MCP Naive     ${bar(mcpNaiveOverhead, maxOvh, 30)} ${padLeft(mcpNaiveOverhead.toLocaleString(), 6)} tok  (${mcpTools.length} tools)`);
-  console.log(`  MCP+Search    ${bar(mcpSearchOverhead, maxOvh, 30)} ${padLeft(mcpSearchOverhead.toLocaleString(), 6)} tok  (2 tools)`);
-  console.log(`  CLI (ocli)    ${bar(cliOverhead, maxOvh, 30)} ${padLeft(cliOverhead.toLocaleString(), 6)} tok  (1 tool)`);
+  console.log(`  MCP Naive          ${bar(mcpNaiveOverhead, maxOvh, 25)} ${padLeft(mcpNaiveOverhead.toLocaleString(), 6)} tok  (${mcpTools.length} tools)`);
+  console.log(`  MCP+Search Full    ${bar(mcpSearchFullOverhead, maxOvh, 25)} ${padLeft(mcpSearchFullOverhead.toLocaleString(), 6)} tok  (2 tools)`);
+  console.log(`  MCP+Search Compact ${bar(mcpSearchCompactOverhead, maxOvh, 25)} ${padLeft(mcpSearchCompactOverhead.toLocaleString(), 6)} tok  (3 tools)`);
+  console.log(`  CLI (ocli)         ${bar(cliOverhead, maxOvh, 25)} ${padLeft(cliOverhead.toLocaleString(), 6)} tok  (1 tool)`);
   console.log();
 
   // ── Search result size comparison ──
   console.log(dline);
-  console.log("  SEARCH RESULT SIZE (returned to agent, becomes context)");
+  console.log("  SEARCH RESULT SIZE — query: \"find pets by status\", top 3");
   console.log(dline);
   console.log();
-  console.log(`  When agent searches for 3 matching endpoints:`);
+
+  const maxRes = mcpSearchFullResultTok;
+  console.log(`  MCP Full search    ${bar(mcpSearchFullResultTok, maxRes, 25)} ${padLeft(mcpSearchFullResultTok.toLocaleString(), 6)} tok  (name + desc + full JSON schema)`);
+  console.log(`  MCP Compact search ${bar(mcpSearchCompactResultTok, maxRes, 25)} ${padLeft(mcpSearchCompactResultTok.toLocaleString(), 6)} tok  (name + desc only)`);
+  console.log(`  CLI search         ${bar(cliSearchResultTok, maxRes, 25)} ${padLeft(cliSearchResultTok.toLocaleString(), 6)} tok  (name + method + path + desc)`);
+  console.log();
+  console.log(`  get_tool_schema    ${bar(mcpGetSchemaResultTok, maxRes, 25)} ${padLeft(mcpGetSchemaResultTok.toLocaleString(), 6)} tok  (MCP: full schema for 1 tool)`);
+  console.log(`  ocli cmd --help    ${bar(cliHelpResultTok, maxRes, 25)} ${padLeft(cliHelpResultTok.toLocaleString(), 6)} tok  (CLI: text help for 1 command)`);
   console.log();
 
-  const maxRes = mcpSearchResultTokens;
-  console.log(`  MCP+Search    ${bar(mcpSearchResultTokens, maxRes, 30)} ${padLeft(mcpSearchResultTokens.toLocaleString(), 6)} tok  (full JSON schemas)`);
-  console.log(`  CLI (ocli)    ${bar(cliSearchResultTokens, maxRes, 30)} ${padLeft(cliSearchResultTokens.toLocaleString(), 6)} tok  (name + method + path)`);
-  console.log();
-  console.log(`  MCP search returns ${(mcpSearchResultTokens / cliSearchResultTokens).toFixed(1)}x more tokens because it includes`);
-  console.log(`  full parameter schemas for each matched tool.`);
-  console.log();
-
-  // ── Per-task total cost ──
+  // ── Per-task total cost (realistic multi-turn flows) ──
   console.log(dline);
-  console.log("  TOTAL TOKENS PER TASK (full agent cycle)");
+  console.log("  TOTAL TOKENS PER TASK (realistic multi-turn agent flow)");
   console.log(dline);
   console.log();
 
   // MCP Naive: 1 turn = overhead + user msg (20) + assistant output (50)
   const mcpNaivePerTask = mcpNaiveOverhead + 20 + 50;
 
-  // MCP+Search: 2 turns
+  // MCP+Search Full: 2 turns
   // Turn 1: overhead + user(20) + output(30 for search call)
-  // Turn 2: overhead + user(20) + search_result(mcpSearchResultTokens) + prev_msgs(50) + output(50 for call_api)
-  const mcpSearchPerTask = (mcpSearchOverhead + 20 + 30) + (mcpSearchOverhead + 20 + mcpSearchResultTokens + 50 + 50);
+  // Turn 2: overhead + user(20) + search_result_full + prev_msgs(50) + output(50 for call_api)
+  const mcpSearchFullPerTask =
+    (mcpSearchFullOverhead + 20 + 30) +
+    (mcpSearchFullOverhead + 20 + mcpSearchFullResultTok + 50 + 50);
 
-  // CLI: 2 turns
-  // Turn 1: overhead + user(20) + output(30 for search command)
-  // Turn 2: overhead + user(20) + search_result(cliSearchResultTokens) + prev_msgs(50) + output(30 for execute)
-  const cliPerTask = (cliOverhead + 20 + 30) + (cliOverhead + 20 + cliSearchResultTokens + 50 + 30);
+  // MCP+Search Compact: 3 turns
+  // Turn 1: overhead + user(20) + output(30 for search call)
+  // Turn 2: overhead + user(20) + compact_search_result + prev_msgs(50) + output(30 for get_schema)
+  // Turn 3: overhead + user(20) + schema_result + prev_msgs(80) + output(50 for call_api)
+  const mcpSearchCompactPerTask =
+    (mcpSearchCompactOverhead + 20 + 30) +
+    (mcpSearchCompactOverhead + 20 + mcpSearchCompactResultTok + 50 + 30) +
+    (mcpSearchCompactOverhead + 20 + mcpGetSchemaResultTok + 80 + 50);
+
+  // CLI: 3 turns (search → help → execute)
+  // Turn 1: overhead + user(20) + output(40 for search command)
+  // Turn 2: overhead + user(20) + search_result + prev_msgs(60) + output(40 for --help command)
+  // Turn 3: overhead + user(20) + help_result + prev_msgs(100) + output(40 for execute)
+  const cliPerTask =
+    (cliOverhead + 20 + 40) +
+    (cliOverhead + 20 + cliSearchResultTok + 60 + 40) +
+    (cliOverhead + 20 + cliHelpResultTok + 100 + 40);
 
   const maxTask = mcpNaivePerTask;
-  console.log(`  MCP Naive     ${bar(mcpNaivePerTask, maxTask, 30)} ${padLeft(mcpNaivePerTask.toLocaleString(), 6)} tok  (1 turn)`);
-  console.log(`  MCP+Search    ${bar(mcpSearchPerTask, maxTask, 30)} ${padLeft(mcpSearchPerTask.toLocaleString(), 6)} tok  (2 turns)`);
-  console.log(`  CLI (ocli)    ${bar(cliPerTask, maxTask, 30)} ${padLeft(cliPerTask.toLocaleString(), 6)} tok  (2 turns)`);
+  console.log(`  MCP Naive          ${bar(mcpNaivePerTask, maxTask, 25)} ${padLeft(mcpNaivePerTask.toLocaleString(), 6)} tok  (1 turn)`);
+  console.log(`  MCP+Search Full    ${bar(mcpSearchFullPerTask, maxTask, 25)} ${padLeft(mcpSearchFullPerTask.toLocaleString(), 6)} tok  (2 turns)`);
+  console.log(`  MCP+Search Compact ${bar(mcpSearchCompactPerTask, maxTask, 25)} ${padLeft(mcpSearchCompactPerTask.toLocaleString(), 6)} tok  (3 turns)`);
+  console.log(`  CLI (ocli)         ${bar(cliPerTask, maxTask, 25)} ${padLeft(cliPerTask.toLocaleString(), 6)} tok  (3 turns)`);
+  console.log();
+
+  // ── Per-task breakdown ──
+  console.log("  Per-turn breakdown (MCP+Search Compact vs CLI):");
+  console.log();
+  console.log("  MCP+Search Compact:");
+  console.log(`    Turn 1 (search):     overhead(${mcpSearchCompactOverhead}) + user(20) + output(30) = ${mcpSearchCompactOverhead + 20 + 30} tok`);
+  console.log(`    Turn 2 (get_schema): overhead(${mcpSearchCompactOverhead}) + user(20) + search_result(${mcpSearchCompactResultTok}) + history(50) + output(30) = ${mcpSearchCompactOverhead + 20 + mcpSearchCompactResultTok + 50 + 30} tok`);
+  console.log(`    Turn 3 (call_api):   overhead(${mcpSearchCompactOverhead}) + user(20) + schema(${mcpGetSchemaResultTok}) + history(80) + output(50) = ${mcpSearchCompactOverhead + 20 + mcpGetSchemaResultTok + 80 + 50} tok`);
+  console.log();
+  console.log("  CLI (ocli):");
+  console.log(`    Turn 1 (search):     overhead(${cliOverhead}) + user(20) + output(40) = ${cliOverhead + 20 + 40} tok`);
+  console.log(`    Turn 2 (--help):     overhead(${cliOverhead}) + user(20) + search_result(${cliSearchResultTok}) + history(60) + output(40) = ${cliOverhead + 20 + cliSearchResultTok + 60 + 40} tok`);
+  console.log(`    Turn 3 (execute):    overhead(${cliOverhead}) + user(20) + help_result(${cliHelpResultTok}) + history(100) + output(40) = ${cliOverhead + 20 + cliHelpResultTok + 100 + 40} tok`);
   console.log();
 
   // ── 10 tasks total ──
   const mcpNaive10 = mcpNaivePerTask * 10;
-  const mcpSearch10 = mcpSearchPerTask * 10;
+  const mcpSearchFull10 = mcpSearchFullPerTask * 10;
+  const mcpSearchCompact10 = mcpSearchCompactPerTask * 10;
   const cli10 = cliPerTask * 10;
 
   console.log(`  10 tasks total:`);
-  console.log(`  MCP Naive     ${bar(mcpNaive10, mcpNaive10, 30)} ${padLeft(mcpNaive10.toLocaleString(), 7)} tok`);
-  console.log(`  MCP+Search    ${bar(mcpSearch10, mcpNaive10, 30)} ${padLeft(mcpSearch10.toLocaleString(), 7)} tok  (${mcpSearch10 > mcpNaive10 ? "+" : "-"}${Math.abs(((mcpSearch10/mcpNaive10 - 1)*100)).toFixed(0)}% vs naive)`);
-  console.log(`  CLI (ocli)    ${bar(cli10, mcpNaive10, 30)} ${padLeft(cli10.toLocaleString(), 7)} tok  (-${((1 - cli10/mcpNaive10)*100).toFixed(0)}% vs naive)`);
+  console.log(`  MCP Naive          ${bar(mcpNaive10, mcpNaive10, 25)} ${padLeft(mcpNaive10.toLocaleString(), 7)} tok`);
+  console.log(`  MCP+Search Full    ${bar(mcpSearchFull10, mcpNaive10, 25)} ${padLeft(mcpSearchFull10.toLocaleString(), 7)} tok  (${mcpSearchFull10 > mcpNaive10 ? "+" : "-"}${Math.abs(((mcpSearchFull10/mcpNaive10 - 1)*100)).toFixed(0)}% vs naive)`);
+  console.log(`  MCP+Search Compact ${bar(mcpSearchCompact10, mcpNaive10, 25)} ${padLeft(mcpSearchCompact10.toLocaleString(), 7)} tok  (${mcpSearchCompact10 > mcpNaive10 ? "+" : "-"}${Math.abs(((mcpSearchCompact10/mcpNaive10 - 1)*100)).toFixed(0)}% vs naive)`);
+  console.log(`  CLI (ocli)         ${bar(cli10, mcpNaive10, 25)} ${padLeft(cli10.toLocaleString(), 7)} tok  (-${((1 - cli10/mcpNaive10)*100).toFixed(0)}% vs naive)`);
   console.log();
 
   // ── Scaling projection ──
@@ -367,8 +570,6 @@ async function main(): Promise<void> {
   console.log();
 
   const tokPerEp = mcpNaiveToolTokens / mcpTools.length;
-  // MCP search result size also scales with endpoint complexity
-  const searchResultTokPerEp = mcpSearchResultTokens / 3; // per matched endpoint in result
 
   const scalePoints = [
     { n: 19, label: "Petstore" },
@@ -379,47 +580,28 @@ async function main(): Promise<void> {
     { n: 845, label: "GitHub API" },
   ];
 
-  console.log(`  ${padRight("Endpoints", 11)} ${padRight("MCP Naive", 14)} ${padRight("MCP+Search", 14)} ${padRight("CLI (ocli)", 14)} ${padRight("Naive/CLI", 10)}`);
+  console.log(`  ${padRight("Endpoints", 11)} ${padRight("MCP Naive", 14)} ${padRight("MCP+S Full", 14)} ${padRight("MCP+S Compact", 16)} ${padRight("CLI (ocli)", 14)} ${padRight("Naive/CLI", 10)}`);
   console.log("  " + line);
 
   for (const pt of scalePoints) {
     const naive = Math.ceil(tokPerEp * pt.n) + mcpNaiveSysTok;
-    const search = mcpSearchOverhead; // constant — only 2 tools
-    const cli = cliOverhead; // constant — only 1 tool
+    const searchFull = mcpSearchFullOverhead;
+    const searchCompact = mcpSearchCompactOverhead;
+    const cli = cliOverhead;
     const label = pt.label ? ` ← ${pt.label}` : "";
 
     console.log(
       `  ${padRight(String(pt.n), 11)} ` +
       `${padLeft(naive.toLocaleString(), 8)} tok  ` +
-      `${padLeft(search.toLocaleString(), 8)} tok  ` +
+      `${padLeft(searchFull.toLocaleString(), 8)} tok  ` +
+      `${padLeft(searchCompact.toLocaleString(), 10)} tok  ` +
       `${padLeft(cli.toLocaleString(), 8)} tok  ` +
       `${padLeft((naive / cli).toFixed(0) + "x", 6)}${label}`
     );
   }
   console.log();
-
-  // ── But MCP+Search has a hidden cost: search result size ──
-  console.log(dline);
-  console.log("  HIDDEN COST: SEARCH RESULT IN CONVERSATION HISTORY");
-  console.log(dline);
-  console.log();
-  console.log("  MCP+Search tool overhead per turn is low (like CLI),");
-  console.log("  but the search RESULT carries full JSON schemas:");
-  console.log();
-
-  for (const pt of scalePoints) {
-    // Search returns 3 results; each result's schema size scales with API complexity
-    const mcpResultTok = Math.ceil(searchResultTokPerEp * 3 * (1 + pt.n / 100)); // schemas get bigger with larger APIs
-    const cliResultTok = 30 + Math.ceil(pt.n * 0.02); // CLI text scales minimally
-
-    const label = pt.label ? ` ← ${pt.label}` : "";
-    console.log(
-      `  ${padRight(String(pt.n) + " ep", 11)} ` +
-      `MCP+Search result: ${padLeft(mcpResultTok.toLocaleString(), 5)} tok   ` +
-      `CLI result: ${padLeft(cliResultTok.toLocaleString(), 4)} tok   ` +
-      `${(mcpResultTok / cliResultTok).toFixed(0)}x${label}`
-    );
-  }
+  console.log("  Note: MCP+Search and CLI overhead is constant regardless of endpoint count.");
+  console.log(`  MCP Naive grows linearly — every endpoint adds ~${Math.round(tokPerEp)} tokens per turn.`);
   console.log();
 
   // ── Accuracy ──
@@ -459,8 +641,7 @@ async function main(): Promise<void> {
   console.log();
   console.log(`  Top-1: ${top1}/${total} (${((top1/total)*100).toFixed(0)}%)   Top-3: ${top3}/${total} (${((top3/total)*100).toFixed(0)}%)   Top-5: ${top5}/${total} (${((top5/total)*100).toFixed(0)}%)`);
   console.log();
-  console.log(`  Note: Both MCP+Search and CLI use the same BM25 engine,`);
-  console.log(`  so accuracy is identical. The difference is only in token cost.`);
+  console.log(`  All strategies use the same BM25 engine — accuracy is identical.`);
   console.log();
 
   // ── Monthly cost at scale ──
@@ -472,30 +653,43 @@ async function main(): Promise<void> {
   const price = 3.0;
   const dailyTasks = 100;
 
-  const costLine = (label: string, tokPerTask: number, endpoints: number) => {
+  const costLine = (label: string, tokPerTask: number) => {
     const monthly = (tokPerTask * dailyTasks * 30 / 1_000_000) * price;
-    return `  ${padRight(label, 18)} ${padLeft(tokPerTask.toLocaleString(), 7)} tok/task   $${padLeft(monthly.toFixed(2), 8)}/month`;
+    return `  ${padRight(label, 22)} ${padLeft(tokPerTask.toLocaleString(), 7)} tok/task   $${padLeft(monthly.toFixed(2), 8)}/month`;
   };
 
-  console.log(`  ${padRight("", 18)} ${padRight("Per task", 18)} Monthly cost`);
+  console.log(`  ${padRight("", 22)} ${padRight("Per task", 18)} Monthly cost`);
   console.log("  " + line);
   console.log(`  19 endpoints (Petstore):`);
-  console.log(costLine("  MCP Naive", mcpNaivePerTask, 19));
-  console.log(costLine("  MCP+Search", mcpSearchPerTask, 19));
-  console.log(costLine("  CLI (ocli)", cliPerTask, 19));
+  console.log(costLine("  MCP Naive", mcpNaivePerTask));
+  console.log(costLine("  MCP+Search Full", mcpSearchFullPerTask));
+  console.log(costLine("  MCP+Search Compact", mcpSearchCompactPerTask));
+  console.log(costLine("  CLI (ocli)", cliPerTask));
   console.log();
 
   // At 845 endpoints
   const naive845overhead = Math.ceil(tokPerEp * 845) + mcpNaiveSysTok;
   const naive845task = naive845overhead + 20 + 50;
-  const search845resultTok = Math.ceil(searchResultTokPerEp * 3 * (1 + 845 / 100));
-  const search845task = (mcpSearchOverhead + 20 + 30) + (mcpSearchOverhead + 20 + search845resultTok + 50 + 50);
-  const cli845task = cliPerTask; // CLI cost doesn't change with endpoint count
+  // For 845-endpoint API, search results are bigger (more complex schemas)
+  const scaleFactor845 = 845 / 19; // schemas scale with API complexity
+  const searchFull845resultTok = Math.ceil(mcpSearchFullResultTok * Math.sqrt(scaleFactor845));
+  const searchFull845task = (mcpSearchFullOverhead + 20 + 30) + (mcpSearchFullOverhead + 20 + searchFull845resultTok + 50 + 50);
+  const getSchema845resultTok = Math.ceil(mcpGetSchemaResultTok * Math.sqrt(scaleFactor845));
+  const searchCompact845task =
+    (mcpSearchCompactOverhead + 20 + 30) +
+    (mcpSearchCompactOverhead + 20 + mcpSearchCompactResultTok + 50 + 30) +
+    (mcpSearchCompactOverhead + 20 + getSchema845resultTok + 80 + 50);
+  const cliHelp845resultTok = Math.ceil(cliHelpResultTok * Math.sqrt(scaleFactor845));
+  const cli845task =
+    (cliOverhead + 20 + 40) +
+    (cliOverhead + 20 + cliSearchResultTok + 60 + 40) +
+    (cliOverhead + 20 + cliHelp845resultTok + 100 + 40);
 
   console.log(`  845 endpoints (GitHub API scale):`);
-  console.log(costLine("  MCP Naive", naive845task, 845));
-  console.log(costLine("  MCP+Search", search845task, 845));
-  console.log(costLine("  CLI (ocli)", cli845task, 845));
+  console.log(costLine("  MCP Naive", naive845task));
+  console.log(costLine("  MCP+Search Full", searchFull845task));
+  console.log(costLine("  MCP+Search Compact", searchCompact845task));
+  console.log(costLine("  CLI (ocli)", cli845task));
   console.log();
 
   // ── Final verdict ──
@@ -503,18 +697,20 @@ async function main(): Promise<void> {
   console.log("  VERDICT");
   console.log(dline);
   console.log();
-  console.log(`  ${padRight("", 16)} ${padRight("Overhead/turn", 16)} ${padRight("Search result", 16)} ${padRight("Accuracy", 12)} Server?`);
+  console.log(`  ${padRight("", 22)} ${padRight("Overhead/turn", 16)} ${padRight("Turns", 8)} ${padRight("Search result", 16)} ${padRight("Accuracy", 10)} Server?`);
   console.log("  " + line);
-  console.log(`  ${padRight("MCP Naive", 16)} ${padLeft(mcpNaiveOverhead.toLocaleString(), 6)} tok       ${padRight("N/A", 16)} ${padRight("100%", 12)} Yes`);
-  console.log(`  ${padRight("MCP+Search", 16)} ${padLeft(mcpSearchOverhead.toLocaleString(), 6)} tok       ${padLeft(mcpSearchResultTokens.toLocaleString(), 5)} tok/query   ${padLeft(((top3/total)*100).toFixed(0) + "%", 5)}${" ".repeat(7)} Yes`);
-  console.log(`  ${padRight("CLI (ocli)", 16)} ${padLeft(cliOverhead.toLocaleString(), 6)} tok       ${padLeft(cliSearchResultTokens.toLocaleString(), 5)} tok/query   ${padLeft(((top3/total)*100).toFixed(0) + "%", 5)}${" ".repeat(7)} No`);
+  console.log(`  ${padRight("MCP Naive", 22)} ${padLeft(mcpNaiveOverhead.toLocaleString(), 6)} tok       ${padRight("1", 8)} ${padRight("N/A", 16)} ${padRight("100%", 10)} Yes`);
+  console.log(`  ${padRight("MCP+Search Full", 22)} ${padLeft(mcpSearchFullOverhead.toLocaleString(), 6)} tok       ${padRight("2", 8)} ${padLeft(mcpSearchFullResultTok.toLocaleString(), 5)} tok/query   ${padLeft(((top3/total)*100).toFixed(0) + "%", 5)}${" ".repeat(5)} Yes`);
+  console.log(`  ${padRight("MCP+Search Compact", 22)} ${padLeft(mcpSearchCompactOverhead.toLocaleString(), 6)} tok       ${padRight("3", 8)} ${padLeft(mcpSearchCompactResultTok.toLocaleString(), 5)} tok/query   ${padLeft(((top3/total)*100).toFixed(0) + "%", 5)}${" ".repeat(5)} Yes`);
+  console.log(`  ${padRight("CLI (ocli)", 22)} ${padLeft(cliOverhead.toLocaleString(), 6)} tok       ${padRight("3", 8)} ${padLeft(cliSearchResultTok.toLocaleString(), 5)} tok/query   ${padLeft(((top3/total)*100).toFixed(0) + "%", 5)}${" ".repeat(5)} No`);
   console.log();
   console.log("  Key insights:");
-  console.log("  - MCP Naive is simple but scales terribly (130K tok at 845 endpoints)");
-  console.log("  - MCP+Search fixes the overhead but search results carry full schemas");
-  console.log(`  - CLI returns ${(mcpSearchResultTokens / cliSearchResultTokens).toFixed(0)}x smaller search results (text vs JSON schemas)`);
+  console.log("  - MCP Naive is simplest but scales terribly (130K+ tok at 845 endpoints)");
+  console.log("  - MCP+Search Full has low overhead but search results carry full JSON schemas");
+  console.log("  - MCP+Search Compact is the fairest MCP comparison to CLI (same flow: search → schema → call)");
+  console.log(`  - CLI and MCP Compact have similar search results; CLI wins on overhead (${cliOverhead} vs ${mcpSearchCompactOverhead} tok/turn)`);
   console.log("  - CLI needs no MCP server — any agent with shell access works");
-  console.log("  - Both search approaches share the same BM25 accuracy (93% top-3)");
+  console.log("  - All search strategies share the same BM25 accuracy");
   console.log();
 }
 

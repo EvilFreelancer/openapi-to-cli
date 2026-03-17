@@ -28,31 +28,34 @@ When an agent has access to 200+ API endpoints, loading all of them as MCP tools
 
 ### Comparison
 
-| Feature | ocli | [openapi-cli-generator](https://github.com/danielgtaylor/openapi-cli-generator) | [CLI-Anything](https://github.com/HKUDS/CLI-Anything) |
-|---------|:----:|:---------------------:|:-------------:|
-| Runtime interpretation (no codegen) | ✅ | ❌ | ❌ |
-| Works without LLM | ✅ | ✅ | ❌ |
-| Zero-setup install (`npx`) | ✅ | ❌ | ❌ |
-| Instant API onboarding (seconds) | ✅ | ❌ | ❌ |
-| Multiple API profiles in one binary | ✅ | ❌ | ❌ |
-| Multiple endpoint sets per API | ✅ | ❌ | ❌ |
-| BM25 command search | ✅ | ❌ | ❌ |
-| Regex command search | ✅ | ❌ | ❌ |
-| Per-profile endpoint filtering | ✅ | ❌ | ❌ |
-| OpenAPI/Swagger spec (JSON + YAML) | ✅ | ✅ | ❌ |
-| Spec caching with refresh | ✅ | ❌ | ❌ |
-| Add new API without recompile | ✅ | ❌ | ❌ |
-| Non-HTTP integrations (desktop apps) | ❌ | ❌ | ✅ |
-| Session management / undo-redo | ❌ | ❌ | ✅ |
-| JSON structured output | ❌ | ✅ | ✅ |
-| Custom HTTP headers | ✅ | ❌ | ❌ |
-| Command name prefix | ✅ | ❌ | ❌ |
-| Basic / Bearer auth | ✅ | ✅ | ❌ |
-| OAuth2 / Auth0 | ❌ | ✅ | ✅ |
-| Response JMESPath filtering | ❌ | ✅ | ❌ |
-| Syntax-highlighted output | ❌ | ✅ | ❌ |
-| Auto-generated tests | ❌ | ❌ | ✅ |
-| Active project | ✅ | ❌ (deprecated) | ✅ |
+| Feature | ocli | [mcp2cli](https://github.com/knowsuchagency/mcp2cli) | [openapi-cli-generator](https://github.com/danielgtaylor/openapi-cli-generator) | [CLI-Anything](https://github.com/HKUDS/CLI-Anything) |
+|---------|:----:|:------:|:---------------------:|:-------------:|
+| Runtime interpretation (no codegen) | ✅ | ✅ | ❌ | ❌ |
+| Works without LLM | ✅ | ✅ | ✅ | ❌ |
+| Zero-setup install (`npx`/`uvx`) | ✅ | ✅ | ❌ | ❌ |
+| Instant API onboarding (seconds) | ✅ | ✅ | ❌ | ❌ |
+| Multiple API profiles in one binary | ✅ | ✅ (bake mode) | ❌ | ❌ |
+| Multiple endpoint sets per API | ✅ | ✅ (include/exclude globs) | ❌ | ❌ |
+| BM25 command search | ✅ | ❌ (substring only) | ❌ | ❌ |
+| Regex command search | ✅ | ❌ | ❌ | ❌ |
+| Per-profile endpoint filtering | ✅ | ✅ | ❌ | ❌ |
+| OpenAPI/Swagger spec (JSON + YAML) | ✅ | ✅ | ✅ | ❌ |
+| MCP server support | ❌ | ✅ (HTTP/SSE/stdio) | ❌ | ❌ |
+| GraphQL support | ❌ | ✅ (introspection) | ❌ | ❌ |
+| Spec caching with refresh | ✅ | ✅ (1h TTL) | ❌ | ❌ |
+| Add new API without recompile | ✅ | ✅ | ❌ | ❌ |
+| Non-HTTP integrations (desktop apps) | ❌ | ❌ | ❌ | ✅ |
+| Session management / undo-redo | ❌ | ✅ (daemon sessions) | ❌ | ✅ |
+| JSON structured output | ❌ | ✅ (JSON + TOON) | ✅ | ✅ |
+| Custom HTTP headers | ✅ | ✅ | ❌ | ❌ |
+| Command name prefix | ✅ | ❌ | ❌ | ❌ |
+| Basic / Bearer auth | ✅ | ✅ | ✅ | ❌ |
+| OAuth2 / Auth0 | ❌ | ✅ (PKCE + client credentials) | ✅ | ✅ |
+| Response jq/JMESPath filtering | ❌ | ✅ (jq) | ✅ (JMESPath) | ❌ |
+| Syntax-highlighted output | ❌ | ✅ | ✅ | ❌ |
+| Token-optimized output (TOON) | ❌ | ✅ (40-60% savings) | ❌ | ❌ |
+| Auto-generated tests | ❌ | ❌ | ❌ | ✅ |
+| Active project | ✅ | ✅ | ❌ (deprecated) | ✅ |
 
 ### High level idea
 
@@ -335,21 +338,35 @@ The project mirrors parts of the `openapi-to-mcp` architecture but implements a 
 - `bm25` - generic BM25 ranking engine with Robertson IDF smoothing and min-heap top-K extraction.
 - `cli` - entry point, argument parser, command registration, help output.
 
-### Using with AI agents (Claude Code skill example)
+### Using with AI agents
 
-An example skill file is provided in [`examples/skill-ocli-api.md`](examples/skill-ocli-api.md). Copy it to `.claude/skills/api.md` in your project to let Claude Code discover and use your API via `ocli`:
+#### OpenClaw skill
+
+Install the [OpenClaw](https://github.com/openclaw/openclaw) skill from ClawHub:
+
+```bash
+clawhub install ocli-api
+```
+
+Or manually copy [`skills/ocli-api/SKILL.md`](skills/ocli-api/SKILL.md) to `~/.openclaw/skills/ocli-api/SKILL.md`.
+
+#### Claude Code skill
+
+Copy the example skill to your project:
 
 ```bash
 cp examples/skill-ocli-api.md .claude/skills/api.md
 ```
 
-The agent workflow:
+#### Agent workflow
+
 1. `ocli commands --query "upload file"` — discover the right command
 2. `ocli files_content_post --help` — check parameters
 3. `ocli files_content_post --file ./data.csv` — execute
 
 ### Similar projects
 
+- [mcp2cli](https://github.com/knowsuchagency/mcp2cli) - Python CLI that converts MCP servers, OpenAPI specs, and GraphQL endpoints into CLI commands at runtime. Supports OAuth, TOON output format, and daemon sessions.
 - [openapi-cli-generator](https://github.com/danielgtaylor/openapi-cli-generator) - generates a CLI from an OpenAPI 3 specification using code generation.
 - [anything-llm-cli](https://github.com/Mintplex-Labs/anything-llm/tree/master/clients/anything-cli) - CLI for interacting with AnythingLLM, can consume HTTP APIs and tools.
 - [openapi-commander](https://github.com/bcoughlan/openapi-commander) - Node.js command-line tool generator based on OpenAPI definitions.
