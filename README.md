@@ -65,6 +65,18 @@ npx openapi-to-cli onboard \
   --openapi-spec https://api.example.com/openapi.json
 ```
 
+### Broader spec support
+
+`ocli` now handles a wider range of real-world OpenAPI and Swagger documents:
+
+- OAS 3 `requestBody` for JSON payloads
+- Swagger 2 `body` and `formData` parameters
+- path-level parameters inherited by operations
+- local `$ref` references for parameters and request bodies
+- header and cookie parameters in generated commands
+
+In practice this improves compatibility with APIs that define inputs outside simple path/query parameters, especially for `POST`, `PUT`, and `PATCH` operations.
+
 ### Command search
 
 ```bash

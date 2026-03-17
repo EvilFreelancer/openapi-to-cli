@@ -181,4 +181,144 @@ describe("OpenapiToCommands", () => {
     const opt = commands[0].options.find((o) => o.name === "user_id");
     expect(opt?.required).toBe(true);
   });
+
+  it("merges path-level and operation-level parameters", () => {
+    const spec: OpenapiSpecLike = {
+      openapi: "3.0.0",
+      paths: {
+        "/teams/{team_id}/members": {
+          parameters: [
+            {
+              name: "team_id",
+              in: "path",
+              required: true,
+              schema: { type: "string" },
+              description: "Team ID",
+            },
+          ],
+          get: {
+            parameters: [
+              {
+                name: "limit",
+                in: "query",
+                schema: { type: "integer" },
+              },
+            ],
+          },
+        },
+      },
+    };
+
+    const commands = openapiToCommands.buildCommands(spec, baseProfile);
+    expect(commands).toHaveLength(1);
+    expect(commands[0].options.map((o) => o.name).sort()).toEqual(["limit", "team_id"]);
+  });
+
+  it("resolves local parameter and requestBody refs", () => {
+    const spec: OpenapiSpecLike = {
+      openapi: "3.0.0",
+      components: {
+        parameters: {
+          OrgSlug: {
+            name: "org_slug",
+            in: "path",
+            required: true,
+            schema: { type: "string" },
+          },
+        },
+        requestBodies: {
+          TriggerWorkflow: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["revision"],
+                  properties: {
+                    revision: { type: "string", description: "Git revision" },
+                    draft: { type: "boolean" },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      paths: {
+        "/orgs/{org_slug}/trigger": {
+          post: {
+            parameters: [
+              { $ref: "#/components/parameters/OrgSlug" },
+            ],
+            requestBody: {
+              $ref: "#/components/requestBodies/TriggerWorkflow",
+            },
+          },
+        },
+      },
+    };
+
+    const commands = openapiToCommands.buildCommands(spec, baseProfile);
+    expect(commands).toHaveLength(1);
+    expect(commands[0].requestContentType).toBe("application/json");
+    expect(commands[0].options.map((o) => `${o.location}:${o.name}`).sort()).toEqual([
+      "body:draft",
+      "body:revision",
+      "path:org_slug",
+    ]);
+
+    const revision = commands[0].options.find((o) => o.name === "revision");
+    expect(revision?.required).toBe(true);
+  });
+
+  it("extracts Swagger 2 body and formData parameters", () => {
+    const spec: OpenapiSpecLike = {
+      swagger: "2.0",
+      paths: {
+        "/upload/{file_id}": {
+          post: {
+            consumes: ["multipart/form-data"],
+            parameters: [
+              {
+                name: "file_id",
+                in: "path",
+                required: true,
+                type: "string",
+              },
+              {
+                name: "meta",
+                in: "body",
+                required: true,
+                schema: {
+                  type: "object",
+                  required: ["title"],
+                  properties: {
+                    title: { type: "string" },
+                    tags: { type: "array" },
+                  },
+                },
+              },
+              {
+                name: "file",
+                in: "formData",
+                required: true,
+                type: "string",
+                description: "File contents",
+              },
+            ],
+          },
+        },
+      },
+    };
+
+    const commands = openapiToCommands.buildCommands(spec, baseProfile);
+    expect(commands).toHaveLength(1);
+    expect(commands[0].requestContentType).toBe("multipart/form-data");
+    expect(commands[0].options.map((o) => `${o.location}:${o.name}`).sort()).toEqual([
+      "body:tags",
+      "body:title",
+      "formData:file",
+      "path:file_id",
+    ]);
+  });
 });
