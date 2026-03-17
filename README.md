@@ -14,15 +14,16 @@ ocli commands --query "create pull request" --limit 3
 ocli repos_owner_repo_pulls_post --owner octocat --repo hello --title "Fix bug" --head feature --base main
 ```
 
-### Where CLI fits: MCP, Skills, and CLI
+### Where CLI fits: Tools, MCP, Skills, and CLI
 
-MCP, skills, and CLI are not competing approaches — they solve different problems at different layers:
+Tools, MCP, skills, and CLI are not competing approaches — they solve different problems at different layers:
 
-| Layer | Tool | Best for |
+| Layer | What | Best for |
 |-------|------|----------|
-| **Infrastructure** | MCP | Centralized APIs, enterprise SSO, shared state between agents, persistent connections |
-| **Agent knowledge** | Skills | On-demand instructions, context isolation, teaching agents _when_ to use a tool |
-| **Runtime execution** | CLI | Long action chains, automation, shell pipelines, minimal per-turn token cost |
+| **Built-in tools** | Standard agent toolset | Critical capabilities that must always be in context (file read/write, shell, browser) |
+| **MCP** | Remote tool servers | APIs that need centralized auth, enterprise SSO, shared state, persistent connections, or can't be in standard delivery |
+| **Skills** | On-demand instructions | Context isolation, teaching agents _when_ and _how_ to use a tool — loaded only when needed |
+| **CLI** | Runtime execution | Long action chains, automation, shell pipelines — agent already knows what to do |
 
 `ocli` lives at the **runtime layer**. When an agent needs to call a REST API — search for the right endpoint, check its parameters, execute the call — CLI does this with minimal context overhead and zero infrastructure.
 
