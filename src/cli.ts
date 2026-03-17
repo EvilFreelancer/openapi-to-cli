@@ -154,11 +154,11 @@ async function runApiCommand(
   const headers = buildHeaders(profile);
 
   const knownOptionNames = new Set(command.options.map((o) => o.name));
-  const body: Record<string, string> = {};
+  const body: Record<string, unknown> = {};
 
   Object.keys(flags).forEach((key) => {
     if (!knownOptionNames.has(key)) {
-      body[key] = flags[key];
+      body[key] = parseBodyFlagValue(flags[key]);
     }
   });
 
@@ -177,6 +177,24 @@ async function runApiCommand(
 
   const response = await httpClient.request(requestConfig);
   stdout(`${JSON.stringify(response.data, null, 2)}\n`);
+}
+
+function parseBodyFlagValue(value: string): unknown {
+  const trimmed = value.trim();
+
+  if (trimmed === "true") return true;
+  if (trimmed === "false") return false;
+  if (trimmed === "null") return null;
+
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+    try {
+      return JSON.parse(trimmed);
+    } catch {
+      throw new Error(`Invalid JSON body value: ${trimmed}`);
+    }
+  }
+
+  return value;
 }
 
 function parseArgs(args: string[]): { flags: Record<string, string>; positional: string[] } {
