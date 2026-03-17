@@ -948,6 +948,82 @@ describe("cli", () => {
     expect(config.headers.Cookie).toBe("session_id=cookie-abc");
   });
 
+  it("shows schema hints in command help output", async () => {
+    const localDir = `${cwd}/.ocli`;
+    const profilesPath = `${localDir}/profiles.ini`;
+    const cachePath = `${localDir}/specs/help-hints-api.json`;
+
+    const spec = {
+      openapi: "3.1.0",
+      paths: {
+        "/reports": {
+          post: {
+            requestBody: {
+              required: true,
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      format: {
+                        type: "string",
+                        enum: ["csv", "json"],
+                        default: "json",
+                      },
+                      note: {
+                        type: "string",
+                        nullable: true,
+                      },
+                      filter: {
+                        oneOf: [
+                          { type: "string" },
+                          { type: "integer" },
+                        ],
+                      },
+                    },
+                    required: ["format"],
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+
+    const iniContent = [
+      "[help-hints-api]",
+      "api_base_url = https://api.example.com",
+      "api_basic_auth = ",
+      "api_bearer_token = tok",
+      "openapi_spec_source = /spec.json",
+      `openapi_spec_cache = ${cachePath}`,
+      "include_endpoints = ",
+      "exclude_endpoints = ",
+      "",
+    ].join("\n");
+
+    const log: string[] = [];
+    const { profileStore, openapiLoader } = createCliDeps(cwd, homeDir, {
+      [profilesPath]: iniContent,
+      [cachePath]: JSON.stringify(spec),
+      [`${localDir}/current`]: "help-hints-api",
+    });
+
+    await run(["reports", "--help"], {
+      cwd,
+      profileStore,
+      openapiLoader,
+      stdout: (msg: string) => log.push(msg),
+    });
+
+    const out = log.join("");
+    expect(out).toContain('enum: "csv", "json"');
+    expect(out).toContain('default: "json"');
+    expect(out).toContain("nullable");
+    expect(out).toContain("oneOf: string | integer");
+  });
+
   it("serializes query arrays and deepObject parameters from spec metadata", async () => {
     const localDir = `${cwd}/.ocli`;
     const profilesPath = `${localDir}/profiles.ini`;
