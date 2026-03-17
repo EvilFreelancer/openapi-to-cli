@@ -11,6 +11,10 @@ export interface CliCommandOption {
   style?: string;
   explode?: boolean;
   collectionFormat?: string;
+  enumValues?: string[];
+  defaultValue?: string;
+  nullable?: boolean;
+  oneOfTypes?: string[];
 }
 
 export interface CliCommand {
@@ -62,6 +66,13 @@ interface SchemaLike {
   properties?: Record<string, SchemaLike>;
   items?: SchemaLike;
   $ref?: string;
+  enum?: unknown[];
+  default?: unknown;
+  nullable?: boolean;
+  oneOf?: SchemaLike[];
+  anyOf?: SchemaLike[];
+  allOf?: SchemaLike[];
+  format?: string;
 }
 
 interface RequestBodyLike {
@@ -235,6 +246,7 @@ export class OpenapiToCommands {
         style: param.style,
         explode: param.explode,
         collectionFormat: param.collectionFormat,
+        ...this.extractSchemaHints(this.resolveSchema(param.schema, spec)),
       });
     }
 
@@ -320,7 +332,8 @@ export class OpenapiToCommands {
     if (!schema) {
       return undefined;
     }
-    return this.resolveValue(schema, spec) as SchemaLike;
+    const resolved = this.resolveValue(schema, spec) as SchemaLike;
+    return this.normalizeSchema(resolved, spec);
   }
 
   private resolveValue(value: unknown, spec: OpenapiSpecLike, seenRefs?: Set<string>): unknown {
@@ -405,8 +418,9 @@ export class OpenapiToCommands {
           name: context.fallbackName,
           location: context.location,
           required: context.required,
-          schemaType: resolvedSchema.type,
+          schemaType: this.describeSchemaType(resolvedSchema),
           description: resolvedSchema.description,
+          ...this.extractSchemaHints(resolvedSchema),
         }];
       }
 
@@ -417,8 +431,9 @@ export class OpenapiToCommands {
           name: propertyName,
           location: context.location,
           required: required.has(propertyName),
-          schemaType: propertySchema?.type,
+          schemaType: this.describeSchemaType(propertySchema),
           description: propertySchema?.description,
+          ...this.extractSchemaHints(propertySchema),
         };
       });
     }
@@ -427,16 +442,102 @@ export class OpenapiToCommands {
       name: context.fallbackName,
       location: context.location,
       required: context.required,
-      schemaType: resolvedSchema.type,
+      schemaType: this.describeSchemaType(resolvedSchema),
       description: resolvedSchema.description,
+      ...this.extractSchemaHints(resolvedSchema),
     }];
   }
 
   private getParameterSchemaType(param: ParameterLike): string | undefined {
-    if (param.schema?.type) {
-      return param.schema.type;
+    if (param.schema) {
+      return this.describeSchemaType(param.schema);
     }
     return param.type;
+  }
+
+  private extractSchemaHints(schema: SchemaLike | undefined): Pick<CliCommandOption, "enumValues" | "defaultValue" | "nullable" | "oneOfTypes"> {
+    if (!schema) {
+      return {};
+    }
+
+    const enumValues = Array.isArray(schema.enum)
+      ? schema.enum.map((value) => JSON.stringify(value))
+      : undefined;
+    const defaultValue = schema.default === undefined ? undefined : JSON.stringify(schema.default);
+    const oneOfTypes = Array.isArray(schema.oneOf)
+      ? schema.oneOf
+        .map((item) => this.describeSchemaType(item))
+        .filter((value): value is string => Boolean(value))
+      : undefined;
+
+    return {
+      ...(enumValues && enumValues.length > 0 ? { enumValues } : {}),
+      ...(defaultValue !== undefined ? { defaultValue } : {}),
+      ...(schema.nullable ? { nullable: true } : {}),
+      ...(oneOfTypes && oneOfTypes.length > 0 ? { oneOfTypes } : {}),
+    };
+  }
+
+  private describeSchemaType(schema: SchemaLike | undefined): string | undefined {
+    if (!schema) {
+      return undefined;
+    }
+
+    if (schema.type) {
+      return schema.format ? `${schema.type}:${schema.format}` : schema.type;
+    }
+
+    if (Array.isArray(schema.oneOf) && schema.oneOf.length > 0) {
+      return "oneOf";
+    }
+
+    if (Array.isArray(schema.anyOf) && schema.anyOf.length > 0) {
+      return "anyOf";
+    }
+
+    if (Object.keys(schema.properties ?? {}).length > 0) {
+      return "object";
+    }
+
+    return undefined;
+  }
+
+  private normalizeSchema(schema: SchemaLike | undefined, spec: OpenapiSpecLike): SchemaLike | undefined {
+    if (!schema) {
+      return undefined;
+    }
+
+    if (!Array.isArray(schema.allOf) || schema.allOf.length === 0) {
+      return schema;
+    }
+
+    const normalizedParts = schema.allOf
+      .map((item) => this.normalizeSchema(this.resolveValue(item, spec) as SchemaLike, spec))
+      .filter((item): item is SchemaLike => Boolean(item));
+
+    const mergedProperties: Record<string, SchemaLike> = {};
+    const mergedRequired = new Set<string>();
+    let mergedType = schema.type;
+    let mergedDescription = schema.description;
+
+    for (const part of normalizedParts) {
+      if (!mergedType && part.type) {
+        mergedType = part.type;
+      }
+      if (!mergedDescription && part.description) {
+        mergedDescription = part.description;
+      }
+      Object.assign(mergedProperties, part.properties ?? {});
+      (part.required ?? []).forEach((required) => mergedRequired.add(required));
+    }
+
+    return {
+      ...schema,
+      type: mergedType,
+      description: mergedDescription,
+      properties: Object.keys(mergedProperties).length > 0 ? mergedProperties : schema.properties,
+      required: mergedRequired.size > 0 ? Array.from(mergedRequired) : schema.required,
+    };
   }
 
   private resolveOperationServerUrl(spec: OpenapiSpecLike, op: PathOperation): string | undefined {

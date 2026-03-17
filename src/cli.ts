@@ -97,7 +97,21 @@ async function runApiCommand(
       } else if (baseType === "boolean") {
         typeLabel = "boolean";
       }
-      const descriptionPart = opt.description ?? "";
+      const hintParts: string[] = [];
+      if (opt.enumValues && opt.enumValues.length > 0) {
+        hintParts.push(`enum: ${opt.enumValues.join(", ")}`);
+      }
+      if (opt.defaultValue !== undefined) {
+        hintParts.push(`default: ${opt.defaultValue}`);
+      }
+      if (opt.nullable) {
+        hintParts.push("nullable");
+      }
+      if (opt.oneOfTypes && opt.oneOfTypes.length > 0) {
+        hintParts.push(`oneOf: ${opt.oneOfTypes.join(" | ")}`);
+      }
+
+      const descriptionPart = [opt.description ?? "", ...hintParts].filter(Boolean).join("; ");
       const descPrefix = opt.required ? "(required)" : "(optional)";
       const desc = descriptionPart ? `${descPrefix} ${descriptionPart}` : descPrefix;
 
