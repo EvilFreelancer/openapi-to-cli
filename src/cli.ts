@@ -40,6 +40,8 @@ interface AddProfileArgs {
   "api-bearer-token"?: string;
   "include-endpoints"?: string;
   "exclude-endpoints"?: string;
+  "command-prefix"?: string;
+  "custom-headers"?: string;
 }
 
 async function runApiCommand(
@@ -76,7 +78,7 @@ async function runApiCommand(
       stdout(`${command.description}\n\n`);
     }
 
-    stdout("Опции:\n\n");
+    stdout("Options:\n\n");
 
     const entries: Array<{
       key: string;
@@ -87,13 +89,13 @@ async function runApiCommand(
 
     command.options.forEach((opt: CliCommandOption) => {
       const key = `--${opt.name}`;
-      const requiredLabel = opt.required ? "необходимо" : "";
+      const requiredLabel = opt.required ? "required" : "";
       const baseType = opt.schemaType;
-      let typeLabel = "строковой тип";
+      let typeLabel = "string";
       if (baseType === "integer" || baseType === "number") {
-        typeLabel = "число";
+        typeLabel = "number";
       } else if (baseType === "boolean") {
-        typeLabel = "булевый тип";
+        typeLabel = "boolean";
       }
       const descriptionPart = opt.description ?? "";
       const descPrefix = opt.required ? "(required)" : "(optional)";
@@ -109,8 +111,8 @@ async function runApiCommand(
 
     entries.push({
       key: "-h, --help",
-      desc: "Показать помощь",
-      typeLabel: "булевый тип",
+      desc: "Show help",
+      typeLabel: "boolean",
       requiredLabel: "",
     });
 
@@ -149,14 +151,14 @@ async function runApiCommand(
   }
 
   const url = buildRequestUrl(profile, command, flags);
-  const headers = buildAuthHeaders(profile);
+  const headers = buildHeaders(profile);
 
   const knownOptionNames = new Set(command.options.map((o) => o.name));
-  const body: Record<string, string> = {};
+  const body: Record<string, unknown> = {};
 
   Object.keys(flags).forEach((key) => {
     if (!knownOptionNames.has(key)) {
-      body[key] = flags[key];
+      body[key] = parseBodyFlagValue(flags[key]);
     }
   });
 
@@ -175,6 +177,24 @@ async function runApiCommand(
 
   const response = await httpClient.request(requestConfig);
   stdout(`${JSON.stringify(response.data, null, 2)}\n`);
+}
+
+function parseBodyFlagValue(value: string): unknown {
+  const trimmed = value.trim();
+
+  if (trimmed === "true") return true;
+  if (trimmed === "false") return false;
+  if (trimmed === "null") return null;
+
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+    try {
+      return JSON.parse(trimmed);
+    } catch {
+      throw new Error(`Invalid JSON body value: ${trimmed}`);
+    }
+  }
+
+  return value;
 }
 
 function parseArgs(args: string[]): { flags: Record<string, string>; positional: string[] } {
@@ -242,8 +262,12 @@ function buildRequestUrl(profile: Profile, command: CliCommand, flags: Record<st
   return url;
 }
 
-function buildAuthHeaders(profile: Profile): Record<string, string> {
+function buildHeaders(profile: Profile): Record<string, string> {
   const headers: Record<string, string> = {};
+
+  if (profile.customHeaders) {
+    Object.assign(headers, profile.customHeaders);
+  }
 
   if (profile.apiBasicAuth) {
     const encoded = Buffer.from(profile.apiBasicAuth).toString("base64");
@@ -274,6 +298,28 @@ export async function run(argv: string[], options?: RunOptions): Promise<void> {
       ? args["exclude-endpoints"].split(",").map((s) => s.trim()).filter(Boolean)
       : [];
 
+    const customHeaders: Record<string, string> = {};
+    if (args["custom-headers"]) {
+      const raw = args["custom-headers"].trim();
+      if (raw.startsWith("{")) {
+        try {
+          Object.assign(customHeaders, JSON.parse(raw));
+        } catch {
+          throw new Error("Invalid --custom-headers JSON. Expected format: '{\"Key\":\"Value\"}'");
+        }
+      } else {
+        // Legacy comma-separated format: Key:Value,Key2:Value2
+        raw.split(",").forEach((pair) => {
+          const colonIdx = pair.indexOf(":");
+          if (colonIdx > 0) {
+            const key = pair.slice(0, colonIdx).trim();
+            const value = pair.slice(colonIdx + 1).trim();
+            if (key) customHeaders[key] = value;
+          }
+        });
+      }
+    }
+
     const profile: Profile = {
       name: profileName,
       apiBaseUrl: args["api-base-url"],
@@ -283,6 +329,8 @@ export async function run(argv: string[], options?: RunOptions): Promise<void> {
       openapiSpecCache: cachePath,
       includeEndpoints,
       excludeEndpoints,
+      commandPrefix: args["command-prefix"] ?? "",
+      customHeaders,
     };
 
     await openapiLoader.loadSpec(profile, { refresh: true });
@@ -296,7 +344,9 @@ export async function run(argv: string[], options?: RunOptions): Promise<void> {
       .option("api-basic-auth", { type: "string", default: "" })
       .option("api-bearer-token", { type: "string", default: "" })
       .option("include-endpoints", { type: "string", default: "" })
-      .option("exclude-endpoints", { type: "string", default: "" });
+      .option("exclude-endpoints", { type: "string", default: "" })
+      .option("command-prefix", { type: "string", default: "", description: "Prefix for command names (e.g. api_ -> api_messages)" })
+      .option("custom-headers", { type: "string", default: "", description: "Custom headers as JSON string, e.g. '{\"X-Tenant\":\"acme\"}'" });
 
   const staticCommands = new Set(["onboard", "profiles", "use", "commands", "search", "help", "--help", "-h", "--version"]);
 

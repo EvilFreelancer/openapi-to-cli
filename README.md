@@ -164,6 +164,7 @@ Note: MCP+Search Compact (search → get_schema → call) is the fairest compari
 
 - [mcp2cli](https://github.com/knowsuchagency/mcp2cli) — Python CLI that converts MCP servers, OpenAPI specs, and GraphQL endpoints into CLI commands at runtime. Supports OAuth, TOON output format, and daemon sessions.
 - [openapi-cli-generator](https://github.com/danielgtaylor/openapi-cli-generator) — generates a CLI from an OpenAPI 3 specification using code generation.
+- [anything-llm-cli](https://github.com/Mintplex-Labs/anything-llm/tree/master/clients/anything-cli) — CLI for interacting with AnythingLLM, can consume HTTP APIs and tools.
 - [openapi-commander](https://github.com/bcoughlan/openapi-commander) — Node.js command-line tool generator based on OpenAPI definitions.
 - [OpenAPI Generator](https://openapi-generator.tech/docs/usage) — general-purpose OpenAPI code generator that can also generate CLI clients.
 - [openapi2cli](https://pypi.org/project/openapi2cli/) — Python tool that builds CLI interfaces for OpenAPI 3 APIs.

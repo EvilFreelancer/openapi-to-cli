@@ -152,6 +152,8 @@ describe("ProfileStore", () => {
       openapiSpecCache: "/home/user/.ocli/specs/savedapi.json",
       includeEndpoints: ["get:/messages"],
       excludeEndpoints: [],
+      commandPrefix: "",
+      customHeaders: {},
     };
 
     store.saveProfile(cwd, profile, { makeCurrent: true });
