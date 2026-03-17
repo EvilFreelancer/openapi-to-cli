@@ -1394,6 +1394,229 @@ describe("cli", () => {
     expect(config.url).toBe("https://ops.example.com/custom/messages");
   });
 
+  it("applies apiKey security scheme in header from profile auth-values", async () => {
+    const localDir = `${cwd}/.ocli`;
+    const profilesPath = `${localDir}/profiles.ini`;
+    const cachePath = `${localDir}/specs/security-header-api.json`;
+
+    const spec = {
+      openapi: "3.0.0",
+      components: {
+        securitySchemes: {
+          ApiKeyAuth: {
+            type: "apiKey",
+            in: "header",
+            name: "X-API-Key",
+          },
+        },
+      },
+      security: [{ ApiKeyAuth: [] }],
+      paths: {
+        "/secure": {
+          get: {
+            summary: "Secure endpoint",
+          },
+        },
+      },
+    };
+
+    const iniContent = [
+      "[security-header-api]",
+      "api_base_url = https://api.example.com",
+      "api_basic_auth = ",
+      "api_bearer_token = ",
+      'auth_values = {"ApiKeyAuth":"secret-123"}',
+      "openapi_spec_source = /spec.json",
+      `openapi_spec_cache = ${cachePath}`,
+      "include_endpoints = ",
+      "exclude_endpoints = ",
+      "",
+    ].join("\n");
+
+    const capturedConfigs: unknown[] = [];
+    const fakeHttpClient: HttpClient = {
+      request: async (config: any) => {
+        capturedConfigs.push(config);
+        return { status: 200, statusText: "OK", headers: {}, config, data: { ok: true } };
+      },
+    };
+
+    const { profileStore, openapiLoader } = createCliDeps(cwd, homeDir, {
+      [profilesPath]: iniContent,
+      [cachePath]: JSON.stringify(spec),
+      [`${localDir}/current`]: "security-header-api",
+    });
+
+    await run(["secure"], {
+      cwd,
+      profileStore,
+      openapiLoader,
+      httpClient: fakeHttpClient,
+      stdout: () => {},
+    });
+
+    const config = capturedConfigs[0] as { headers: Record<string, string> };
+    expect(config.headers["X-API-Key"]).toBe("secret-123");
+  });
+
+  it("applies apiKey security schemes in query and cookie and picks a satisfiable alternative", async () => {
+    const localDir = `${cwd}/.ocli`;
+    const profilesPath = `${localDir}/profiles.ini`;
+    const cachePath = `${localDir}/specs/security-query-cookie-api.json`;
+
+    const spec = {
+      openapi: "3.0.0",
+      components: {
+        securitySchemes: {
+          MissingHeader: {
+            type: "apiKey",
+            in: "header",
+            name: "X-Missing",
+          },
+          QueryKey: {
+            type: "apiKey",
+            in: "query",
+            name: "api_key",
+          },
+          SessionCookie: {
+            type: "apiKey",
+            in: "cookie",
+            name: "session_id",
+          },
+        },
+      },
+      paths: {
+        "/reports": {
+          get: {
+            security: [{ MissingHeader: [] }, { QueryKey: [], SessionCookie: [] }],
+            summary: "Reports",
+          },
+        },
+      },
+    };
+
+    const iniContent = [
+      "[security-query-cookie-api]",
+      "api_base_url = https://api.example.com",
+      "api_basic_auth = ",
+      "api_bearer_token = ",
+      'auth_values = {"QueryKey":"q-123","SessionCookie":"c-456"}',
+      "openapi_spec_source = /spec.json",
+      `openapi_spec_cache = ${cachePath}`,
+      "include_endpoints = ",
+      "exclude_endpoints = ",
+      "",
+    ].join("\n");
+
+    const capturedConfigs: unknown[] = [];
+    const fakeHttpClient: HttpClient = {
+      request: async (config: any) => {
+        capturedConfigs.push(config);
+        return { status: 200, statusText: "OK", headers: {}, config, data: { ok: true } };
+      },
+    };
+
+    const { profileStore, openapiLoader } = createCliDeps(cwd, homeDir, {
+      [profilesPath]: iniContent,
+      [cachePath]: JSON.stringify(spec),
+      [`${localDir}/current`]: "security-query-cookie-api",
+    });
+
+    await run(["reports"], {
+      cwd,
+      profileStore,
+      openapiLoader,
+      httpClient: fakeHttpClient,
+      stdout: () => {},
+    });
+
+    const config = capturedConfigs[0] as { url: string; headers: Record<string, string> };
+    expect(config.url).toBe("https://api.example.com/reports?api_key=q-123");
+    expect(config.headers.Cookie).toBe("session_id=c-456");
+    expect(config.headers["X-Missing"]).toBeUndefined();
+  });
+
+  it("throws when required declared security credentials are missing", async () => {
+    const localDir = `${cwd}/.ocli`;
+    const profilesPath = `${localDir}/profiles.ini`;
+    const cachePath = `${localDir}/specs/security-missing-api.json`;
+
+    const spec = {
+      openapi: "3.0.0",
+      components: {
+        securitySchemes: {
+          ApiKeyAuth: {
+            type: "apiKey",
+            in: "query",
+            name: "api_key",
+          },
+        },
+      },
+      security: [{ ApiKeyAuth: [] }],
+      paths: {
+        "/secure": {
+          get: {
+            summary: "Secure endpoint",
+          },
+        },
+      },
+    };
+
+    const iniContent = [
+      "[security-missing-api]",
+      "api_base_url = https://api.example.com",
+      "api_basic_auth = ",
+      "api_bearer_token = ",
+      "openapi_spec_source = /spec.json",
+      `openapi_spec_cache = ${cachePath}`,
+      "include_endpoints = ",
+      "exclude_endpoints = ",
+      "",
+    ].join("\n");
+
+    const { profileStore, openapiLoader } = createCliDeps(cwd, homeDir, {
+      [profilesPath]: iniContent,
+      [cachePath]: JSON.stringify(spec),
+      [`${localDir}/current`]: "security-missing-api",
+    });
+
+    await expect(
+      run(["secure"], {
+        cwd,
+        profileStore,
+        openapiLoader,
+        stdout: () => {},
+      })
+    ).rejects.toThrow("Missing credentials for the security requirements defined by this operation");
+  });
+
+  it("accepts auth-values during onboarding", async () => {
+    const localDir = `${cwd}/.ocli`;
+    const fs = new MemoryFs({
+      "/project/openapi.json": JSON.stringify({ openapi: "3.0.0", paths: {} }),
+    });
+    const locator = new ConfigLocator({ fs, homeDir });
+    const profileStore = new ProfileStore({ fs, locator });
+    const openapiLoader = new OpenapiLoader({ fs });
+
+    await run(
+      [
+        "onboard",
+        "--api-base-url",
+        "https://api.example.com",
+        "--openapi-spec",
+        "/project/openapi.json",
+        "--auth-values",
+        '{"ApiKeyAuth":"secret-123"}',
+      ],
+      { cwd, profileStore, openapiLoader }
+    );
+
+    const profile = profileStore.getCurrentProfile(cwd);
+    expect(profile?.authValues).toEqual({ ApiKeyAuth: "secret-123" });
+    expect(fs.existsSync(`${localDir}/profiles.ini`)).toBe(true);
+  });
+
   it("sends custom headers from profile in API requests", async () => {
     const localDir = `${cwd}/.ocli`;
     const profilesPath = `${localDir}/profiles.ini`;

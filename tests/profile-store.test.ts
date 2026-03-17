@@ -148,6 +148,7 @@ describe("ProfileStore", () => {
       apiBaseUrl: "http://example.com",
       apiBasicAuth: "",
       apiBearerToken: "X",
+      authValues: {},
       openapiSpecSource: "http://example.com/openapi.json",
       openapiSpecCache: "/home/user/.ocli/specs/savedapi.json",
       includeEndpoints: ["get:/messages"],
@@ -163,9 +164,40 @@ describe("ProfileStore", () => {
 
     const savedProfile = store.getCurrentProfile(cwd);
     expect(savedProfile?.name).toBe("savedapi");
+    expect(savedProfile?.authValues).toEqual({});
 
     expect(fs.existsSync(localDir)).toBe(true);
     expect(fs.existsSync(profilesPath)).toBe(true);
+  });
+
+  it("persists auth_values JSON in profiles.ini", () => {
+    const cwd = "/project";
+    const { store } = createStoreWithFs(cwd, homeDir, {});
+
+    const profile: Profile = {
+      name: "secured",
+      apiBaseUrl: "https://api.example.com",
+      apiBasicAuth: "",
+      apiBearerToken: "",
+      authValues: {
+        ApiKeyAuth: "secret-123",
+        SessionCookie: "cookie-456",
+      },
+      openapiSpecSource: "https://api.example.com/openapi.json",
+      openapiSpecCache: "/home/user/.ocli/specs/secured.json",
+      includeEndpoints: [],
+      excludeEndpoints: [],
+      commandPrefix: "",
+      customHeaders: {},
+    };
+
+    store.saveProfile(cwd, profile);
+
+    const loaded = store.getProfileByName(cwd, "secured");
+    expect(loaded?.authValues).toEqual({
+      ApiKeyAuth: "secret-123",
+      SessionCookie: "cookie-456",
+    });
   });
 
   it("listProfileNames returns all profile section names", () => {

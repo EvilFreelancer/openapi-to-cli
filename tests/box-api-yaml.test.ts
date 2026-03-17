@@ -17,6 +17,7 @@ const profile: Profile = {
   apiBaseUrl: "https://api.box.com/2.0",
   apiBasicAuth: "",
   apiBearerToken: "",
+  authValues: {},
   openapiSpecSource: "",
   openapiSpecCache: "",
   includeEndpoints: [],

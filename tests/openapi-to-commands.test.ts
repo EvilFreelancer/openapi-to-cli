@@ -6,6 +6,7 @@ const baseProfile: Profile = {
   apiBaseUrl: "http://127.0.0.1:3000",
   apiBasicAuth: "",
   apiBearerToken: "",
+  authValues: {},
   openapiSpecSource: "",
   openapiSpecCache: "/home/user/.ocli/specs/myapi.json",
   includeEndpoints: [],

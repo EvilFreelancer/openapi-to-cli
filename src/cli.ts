@@ -34,10 +34,11 @@ const defaultHttpClient: HttpClient = {
 };
 
 interface AddProfileArgs {
-  "api-base-url"?: string;
+  "api-base-url": string;
   "openapi-spec": string;
   "api-basic-auth"?: string;
   "api-bearer-token"?: string;
+  "auth-values"?: string;
   "include-endpoints"?: string;
   "exclude-endpoints"?: string;
   "command-prefix"?: string;
@@ -164,8 +165,9 @@ async function runApiCommand(
     throw new Error(`Missing required options: ${missingRequired.map((n) => `--${n}`).join(", ")}`);
   }
 
-  const url = buildRequestUrl(profile, command, flags);
-  const headers = buildHeaders(profile, command, flags);
+  const securityArtifacts = buildSecurityArtifacts(profile, spec, command);
+  const url = buildRequestUrl(profile, command, flags, securityArtifacts.queryParts);
+  const headers = buildHeaders(profile, command, flags, securityArtifacts);
   const payload = buildRequestPayload(command, flags);
 
   const method = command.method.toUpperCase();
@@ -234,7 +236,12 @@ function parseArgs(args: string[]): { flags: Record<string, string>; positional:
   return { flags, positional };
 }
 
-function buildRequestUrl(profile: Profile, command: CliCommand, flags: Record<string, string>): string {
+function buildRequestUrl(
+  profile: Profile,
+  command: CliCommand,
+  flags: Record<string, string>,
+  securityQueryParts: string[] = []
+): string {
   let pathValue = command.path;
 
   command.options
@@ -260,14 +267,20 @@ function buildRequestUrl(profile: Profile, command: CliCommand, flags: Record<st
       }
     });
 
-  if (queryParts.length > 0) {
-    url += url.includes("?") ? `&${queryParts.join("&")}` : `?${queryParts.join("&")}`;
+  const allQueryParts = [...queryParts, ...securityQueryParts];
+  if (allQueryParts.length > 0) {
+    url += url.includes("?") ? `&${allQueryParts.join("&")}` : `?${allQueryParts.join("&")}`;
   }
 
   return url;
 }
 
-function buildHeaders(profile: Profile, command: CliCommand, flags: Record<string, string>): Record<string, string> {
+function buildHeaders(
+  profile: Profile,
+  command: CliCommand,
+  flags: Record<string, string>,
+  securityArtifacts?: { headers: Record<string, string>; cookies: string[] }
+): Record<string, string> {
   const headers: Record<string, string> = {};
 
   if (profile.customHeaders) {
@@ -279,6 +292,10 @@ function buildHeaders(profile: Profile, command: CliCommand, flags: Record<strin
     headers.Authorization = `Basic ${encoded}`;
   } else if (profile.apiBearerToken) {
     headers.Authorization = `Bearer ${profile.apiBearerToken}`;
+  }
+
+  if (securityArtifacts?.headers) {
+    Object.assign(headers, securityArtifacts.headers);
   }
 
   const cookiePairs: string[] = [];
@@ -302,7 +319,174 @@ function buildHeaders(profile: Profile, command: CliCommand, flags: Record<strin
     headers.Cookie = cookiePairs.join("; ");
   }
 
+  if (securityArtifacts?.cookies && securityArtifacts.cookies.length > 0) {
+    headers.Cookie = headers.Cookie
+      ? `${headers.Cookie}; ${securityArtifacts.cookies.join("; ")}`
+      : securityArtifacts.cookies.join("; ");
+  }
+
   return headers;
+}
+
+interface SecuritySchemeLike {
+  type?: string;
+  scheme?: string;
+  in?: string;
+  name?: string;
+}
+
+function buildSecurityArtifacts(
+  profile: Profile,
+  spec: unknown,
+  command: CliCommand
+): {
+  headers: Record<string, string>;
+  queryParts: string[];
+  cookies: string[];
+} {
+  const operation = getOperationFromSpec(spec, command);
+  const securityRequirements = getSecurityRequirements(spec, operation);
+  const securitySchemes = getSecuritySchemes(spec);
+
+  if (securityRequirements.length === 0) {
+    return { headers: {}, queryParts: [], cookies: [] };
+  }
+
+  for (const requirement of securityRequirements) {
+    const headers: Record<string, string> = {};
+    const queryParts: string[] = [];
+    const cookies: string[] = [];
+    let satisfied = true;
+
+    for (const schemeName of Object.keys(requirement)) {
+      const scheme = securitySchemes[schemeName];
+      const artifacts = applySecurityScheme(profile, schemeName, scheme);
+      if (!artifacts) {
+        satisfied = false;
+        break;
+      }
+
+      Object.assign(headers, artifacts.headers);
+      queryParts.push(...artifacts.queryParts);
+      cookies.push(...artifacts.cookies);
+    }
+
+    if (satisfied) {
+      return { headers, queryParts, cookies };
+    }
+  }
+
+  throw new Error("Missing credentials for the security requirements defined by this operation");
+}
+
+function getOperationFromSpec(spec: unknown, command: CliCommand): Record<string, unknown> | undefined {
+  if (!spec || typeof spec !== "object") {
+    return undefined;
+  }
+
+  const pathItem = (spec as Record<string, unknown>).paths as Record<string, unknown> | undefined;
+  const operationGroup = pathItem?.[command.path] as Record<string, unknown> | undefined;
+  return operationGroup?.[command.method] as Record<string, unknown> | undefined;
+}
+
+function getSecurityRequirements(spec: unknown, operation?: Record<string, unknown>): Array<Record<string, string[]>> {
+  if (operation && Array.isArray(operation.security)) {
+    return operation.security as Array<Record<string, string[]>>;
+  }
+
+  if (spec && typeof spec === "object" && Array.isArray((spec as Record<string, unknown>).security)) {
+    return (spec as Record<string, unknown>).security as Array<Record<string, string[]>>;
+  }
+
+  return [];
+}
+
+function getSecuritySchemes(spec: unknown): Record<string, SecuritySchemeLike> {
+  if (!spec || typeof spec !== "object") {
+    return {};
+  }
+
+  const record = spec as Record<string, unknown>;
+  const components = record.components as Record<string, unknown> | undefined;
+  const oasSchemes = components?.securitySchemes as Record<string, SecuritySchemeLike> | undefined;
+  const swaggerSchemes = record.securityDefinitions as Record<string, SecuritySchemeLike> | undefined;
+
+  return {
+    ...(oasSchemes ?? {}),
+    ...(swaggerSchemes ?? {}),
+  };
+}
+
+function applySecurityScheme(
+  profile: Profile,
+  schemeName: string,
+  scheme?: SecuritySchemeLike
+): {
+  headers: Record<string, string>;
+  queryParts: string[];
+  cookies: string[];
+} | null {
+  if (!scheme?.type) {
+    return null;
+  }
+
+  if (scheme.type === "apiKey") {
+    const value = profile.authValues[schemeName];
+    if (!value || !scheme.name || !scheme.in) {
+      return null;
+    }
+
+    if (scheme.in === "header") {
+      return {
+        headers: { [scheme.name]: value },
+        queryParts: [],
+        cookies: [],
+      };
+    }
+
+    if (scheme.in === "query") {
+      return {
+        headers: {},
+        queryParts: [`${encodeURIComponent(scheme.name)}=${encodeURIComponent(value)}`],
+        cookies: [],
+      };
+    }
+
+    if (scheme.in === "cookie") {
+      return {
+        headers: {},
+        queryParts: [],
+        cookies: [`${encodeURIComponent(scheme.name)}=${encodeURIComponent(value)}`],
+      };
+    }
+
+    return null;
+  }
+
+  if (scheme.type === "http") {
+    const normalized = (scheme.scheme ?? "").toLowerCase();
+    if (normalized === "basic" && profile.apiBasicAuth) {
+      const encoded = Buffer.from(profile.apiBasicAuth).toString("base64");
+      return { headers: { Authorization: `Basic ${encoded}` }, queryParts: [], cookies: [] };
+    }
+
+    if (normalized === "bearer" && profile.apiBearerToken) {
+      return { headers: { Authorization: `Bearer ${profile.apiBearerToken}` }, queryParts: [], cookies: [] };
+    }
+
+    return null;
+  }
+
+  if (scheme.type === "basic" && profile.apiBasicAuth) {
+    const encoded = Buffer.from(profile.apiBasicAuth).toString("base64");
+    return { headers: { Authorization: `Basic ${encoded}` }, queryParts: [], cookies: [] };
+  }
+
+  if ((scheme.type === "oauth2" || scheme.type === "openIdConnect") && profile.apiBearerToken) {
+    return { headers: { Authorization: `Bearer ${profile.apiBearerToken}` }, queryParts: [], cookies: [] };
+  }
+
+  return null;
 }
 
 function buildRequestPayload(
@@ -507,6 +691,7 @@ export async function run(argv: string[], options?: RunOptions): Promise<void> {
       : [];
 
     const customHeaders: Record<string, string> = {};
+    const authValues: Record<string, string> = {};
     if (args["custom-headers"]) {
       const raw = args["custom-headers"].trim();
       if (raw.startsWith("{")) {
@@ -527,12 +712,24 @@ export async function run(argv: string[], options?: RunOptions): Promise<void> {
         });
       }
     }
+    if (args["auth-values"]) {
+      const raw = args["auth-values"].trim();
+      if (!raw.startsWith("{")) {
+        throw new Error("Invalid --auth-values JSON. Expected format: '{\"SchemeName\":\"value\"}'");
+      }
+      try {
+        Object.assign(authValues, JSON.parse(raw));
+      } catch {
+        throw new Error("Invalid --auth-values JSON. Expected format: '{\"SchemeName\":\"value\"}'");
+      }
+    }
 
     const profile: Profile = {
       name: profileName,
-      apiBaseUrl: args["api-base-url"] ?? "",
+      apiBaseUrl: args["api-base-url"],
       apiBasicAuth: args["api-basic-auth"] ?? "",
       apiBearerToken: args["api-bearer-token"] ?? "",
+      authValues,
       openapiSpecSource: args["openapi-spec"],
       openapiSpecCache: cachePath,
       includeEndpoints,
@@ -541,11 +738,7 @@ export async function run(argv: string[], options?: RunOptions): Promise<void> {
       customHeaders,
     };
 
-    const spec = await openapiLoader.loadSpec(profile, { refresh: true });
-    profile.apiBaseUrl = profile.apiBaseUrl || deriveApiBaseUrlFromSpec(spec);
-    if (!profile.apiBaseUrl) {
-      throw new Error("Unable to determine API base URL. Provide --api-base-url explicitly.");
-    }
+    await openapiLoader.loadSpec(profile, { refresh: true });
     profileStore.saveProfile(cwd, profile, { makeCurrent: true });
   };
 
@@ -559,6 +752,11 @@ export async function run(argv: string[], options?: RunOptions): Promise<void> {
       .option("openapi-spec", { type: "string", demandOption: true })
       .option("api-basic-auth", { type: "string", default: "" })
       .option("api-bearer-token", { type: "string", default: "" })
+      .option("auth-values", {
+        type: "string",
+        default: "",
+        description: "Security scheme values as JSON, e.g. '{\"ApiKeyAuth\":\"secret\"}'",
+      })
       .option("include-endpoints", { type: "string", default: "" })
       .option("exclude-endpoints", { type: "string", default: "" })
       .option("command-prefix", { type: "string", default: "", description: "Prefix for command names (e.g. api_ -> api_messages)" })

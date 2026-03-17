@@ -13,6 +13,7 @@ const profile: Profile = {
   apiBaseUrl: "https://api.github.com",
   apiBasicAuth: "",
   apiBearerToken: "",
+  authValues: {},
   openapiSpecSource: "",
   openapiSpecCache: "",
   includeEndpoints: [],

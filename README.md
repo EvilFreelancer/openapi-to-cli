@@ -87,17 +87,16 @@ In practice this improves compatibility with APIs that define inputs outside sim
 
 In practice this improves compatibility with APIs that rely on non-trivial parameter encoding or per-operation server definitions.
 
+### Spec-driven security
 
-### Multi-file specs and richer help
+`ocli` now understands more security metadata from OpenAPI and Swagger documents:
 
-`ocli` now works better with larger, more structured API descriptions:
+- declared `apiKey` security schemes in header, query, and cookie
+- operation-level and root-level `security` requirements
+- support for alternative security requirements when the spec offers multiple options
+- profile-level `auth-values` mapping for named security schemes
 
-- external `$ref` resolution across multiple local or remote OpenAPI / Swagger documents
-- support for multi-document specs that split paths, parameters, and request bodies into separate files
-- richer `--help` output with schema hints such as `enum`, `default`, `nullable`, and `oneOf`
-- better handling of composed schemas that use `allOf` for shared request object structure
-
-In practice this improves compatibility with modular specs and makes generated commands easier to use without opening the original OpenAPI document.
+In practice this means APIs that define authentication in the spec can now inject API keys into the correct place in the request without manually rewriting URLs or headers.
 
 ### Multi-file specs and richer help
 

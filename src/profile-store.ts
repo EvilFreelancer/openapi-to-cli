@@ -9,6 +9,7 @@ export interface Profile {
   apiBaseUrl: string;
   apiBasicAuth: string;
   apiBearerToken: string;
+  authValues: Record<string, string>;
   openapiSpecSource: string;
   openapiSpecCache: string;
   includeEndpoints: string[];
@@ -94,11 +95,23 @@ export class ProfileStore {
       }
     }
 
+    const authValuesRaw = section.auth_values ?? "";
+    const authValues: Record<string, string> = {};
+    if (authValuesRaw) {
+      const trimmed = authValuesRaw.trim();
+      if (trimmed.startsWith("{")) {
+        try {
+          Object.assign(authValues, JSON.parse(trimmed));
+        } catch { /* ignore malformed JSON */ }
+      }
+    }
+
     return {
       name,
       apiBaseUrl: section.api_base_url ?? "",
       apiBasicAuth: section.api_basic_auth ?? "",
       apiBearerToken: section.api_bearer_token ?? "",
+      authValues,
       openapiSpecSource: section.openapi_spec_source ?? "",
       openapiSpecCache: section.openapi_spec_cache ?? "",
       includeEndpoints,
@@ -150,11 +163,15 @@ export class ProfileStore {
     const customHeadersStr = Object.keys(profile.customHeaders).length > 0
       ? JSON.stringify(profile.customHeaders)
       : "";
+    const authValuesStr = Object.keys(profile.authValues).length > 0
+      ? JSON.stringify(profile.authValues)
+      : "";
 
     iniData[sectionName] = {
       api_base_url: profile.apiBaseUrl,
       api_basic_auth: profile.apiBasicAuth,
       api_bearer_token: profile.apiBearerToken,
+      auth_values: authValuesStr,
       openapi_spec_source: profile.openapiSpecSource,
       openapi_spec_cache: profile.openapiSpecCache,
       include_endpoints: profile.includeEndpoints.join(","),
