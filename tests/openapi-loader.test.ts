@@ -88,6 +88,10 @@ describe("OpenapiLoader", () => {
   customHeaders: {},
   };
 
+  beforeEach(() => {
+    mockedAxios.get.mockReset();
+  });
+
   it("downloads spec from HTTP URL and caches it when cache is missing", async () => {
     const spec = { openapi: "3.0.0", info: { title: "API", version: "1.0.0" } };
     mockedAxios.get.mockResolvedValueOnce({ data: spec });
@@ -206,5 +210,63 @@ describe("OpenapiLoader", () => {
     const loaded = await loader.loadSpec(profile, { refresh: true }) as Record<string, unknown>;
 
     expect((loaded as any).info.title).toBe("Auto Detect");
+  });
+
+  it("resolves local external refs across multiple files", async () => {
+    const rootSpec = `openapi: "3.0.0"\npaths:\n  /jobs:\n    $ref: "./paths/jobs.yaml#/jobsPath"\n`;
+    const jobsPath = `jobsPath:\n  post:\n    requestBody:\n      $ref: "./components/request-bodies.yaml#/CreateJob"\n`;
+    const requestBodies = `CreateJob:\n  required: true\n  content:\n    application/json:\n      schema:\n        type: object\n        required: [name]\n        properties:\n          name:\n            type: string\n`;
+
+    const profile: Profile = {
+      ...baseProfile,
+      openapiSpecSource: "/project/root.yaml",
+    };
+
+    const fs = new MemoryFs({
+      "/project/root.yaml": rootSpec,
+      "/project/paths/jobs.yaml": jobsPath,
+      "/project/paths/components/request-bodies.yaml": requestBodies,
+    });
+
+    const loader = new OpenapiLoader({ fs });
+    const loaded = await loader.loadSpec(profile, { refresh: true }) as Record<string, any>;
+
+    expect(loaded.paths["/jobs"].post.requestBody.content["application/json"].schema.properties.name.type).toBe("string");
+  });
+
+  it("resolves remote external refs across multiple documents", async () => {
+    mockedAxios.get.mockImplementation(async (source: string) => {
+      if (source === "https://example.com/root.yaml") {
+        return {
+          data: `openapi: "3.0.0"\npaths:\n  /jobs:\n    $ref: "./paths/jobs.yaml#/jobsPath"\n`,
+        };
+      }
+
+      if (source === "https://example.com/paths/jobs.yaml") {
+        return {
+          data: `jobsPath:\n  get:\n    parameters:\n      - $ref: "../components/params.yaml#/JobId"\n`,
+        };
+      }
+
+      if (source === "https://example.com/components/params.yaml") {
+        return {
+          data: `JobId:\n  name: job_id\n  in: query\n  required: true\n  schema:\n    type: string\n`,
+        };
+      }
+
+      throw new Error(`Unexpected URL: ${source}`);
+    });
+
+    const profile: Profile = {
+      ...baseProfile,
+      openapiSpecSource: "https://example.com/root.yaml",
+    };
+
+    const fs = new MemoryFs();
+    const loader = new OpenapiLoader({ fs });
+    const loaded = await loader.loadSpec(profile, { refresh: true }) as Record<string, any>;
+
+    expect(loaded.paths["/jobs"].get.parameters[0].name).toBe("job_id");
+    expect(loaded.paths["/jobs"].get.parameters[0].in).toBe("query");
   });
 });

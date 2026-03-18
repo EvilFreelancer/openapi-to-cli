@@ -1108,6 +1108,216 @@ describe("cli", () => {
     expect(config.url).toBe("https://ops.example.com/custom/messages");
   });
 
+  it("shows schema hints in command help output", async () => {
+    const localDir = `${cwd}/.ocli`;
+    const profilesPath = `${localDir}/profiles.ini`;
+    const cachePath = `${localDir}/specs/help-hints-api.json`;
+
+    const spec = {
+      openapi: "3.1.0",
+      paths: {
+        "/reports": {
+          post: {
+            requestBody: {
+              required: true,
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      format: {
+                        type: "string",
+                        enum: ["csv", "json"],
+                        default: "json",
+                      },
+                      note: {
+                        type: "string",
+                        nullable: true,
+                      },
+                      filter: {
+                        oneOf: [
+                          { type: "string" },
+                          { type: "integer" },
+                        ],
+                      },
+                    },
+                    required: ["format"],
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+
+    const iniContent = [
+      "[help-hints-api]",
+      "api_base_url = https://api.example.com",
+      "api_basic_auth = ",
+      "api_bearer_token = tok",
+      "openapi_spec_source = /spec.json",
+      `openapi_spec_cache = ${cachePath}`,
+      "include_endpoints = ",
+      "exclude_endpoints = ",
+      "",
+    ].join("\n");
+
+    const log: string[] = [];
+    const { profileStore, openapiLoader } = createCliDeps(cwd, homeDir, {
+      [profilesPath]: iniContent,
+      [cachePath]: JSON.stringify(spec),
+      [`${localDir}/current`]: "help-hints-api",
+    });
+
+    await run(["reports", "--help"], {
+      cwd,
+      profileStore,
+      openapiLoader,
+      stdout: (msg: string) => log.push(msg),
+    });
+
+    const out = log.join("");
+    expect(out).toContain('enum: "csv", "json"');
+    expect(out).toContain('default: "json"');
+    expect(out).toContain("nullable");
+    expect(out).toContain("oneOf: string | integer");
+  });
+
+  it("serializes query arrays and deepObject parameters from spec metadata", async () => {
+    const localDir = `${cwd}/.ocli`;
+    const profilesPath = `${localDir}/profiles.ini`;
+    const cachePath = `${localDir}/specs/serialization-api.json`;
+
+    const spec = {
+      openapi: "3.0.0",
+      paths: {
+        "/reports/{report_id}": {
+          get: {
+            parameters: [
+              {
+                name: "report_id",
+                in: "path",
+                required: true,
+                schema: { type: "array" },
+                style: "label",
+                explode: true,
+              },
+              {
+                name: "tags",
+                in: "query",
+                schema: { type: "array" },
+                style: "pipeDelimited",
+                explode: false,
+              },
+              {
+                name: "filter",
+                in: "query",
+                schema: { type: "object" },
+                style: "deepObject",
+                explode: true,
+              },
+            ],
+          },
+        },
+      },
+    };
+
+    const iniContent = [
+      "[serialization-api]",
+      "api_base_url = https://api.example.com",
+      "api_basic_auth = ",
+      "api_bearer_token = tok",
+      "openapi_spec_source = /spec.json",
+      `openapi_spec_cache = ${cachePath}`,
+      "include_endpoints = ",
+      "exclude_endpoints = ",
+      "",
+    ].join("\n");
+
+    const capturedConfigs: unknown[] = [];
+    const fakeHttpClient: HttpClient = {
+      request: async (config: any) => {
+        capturedConfigs.push(config);
+        return { status: 200, statusText: "OK", headers: {}, config, data: { ok: true } };
+      },
+    };
+
+    const { profileStore, openapiLoader } = createCliDeps(cwd, homeDir, {
+      [profilesPath]: iniContent,
+      [cachePath]: JSON.stringify(spec),
+      [`${localDir}/current`]: "serialization-api",
+    });
+
+    await run(
+      [
+        "reports_report_id",
+        "--report_id", '["r1","r2"]',
+        "--tags", '["daily","ops"]',
+        "--filter", '{"status":"open","owner":"alice"}',
+      ],
+      { cwd, profileStore, openapiLoader, httpClient: fakeHttpClient, stdout: () => {} }
+    );
+
+    const config = capturedConfigs[0] as { url: string };
+    expect(config.url).toBe(
+      "https://api.example.com/reports/.r1.r2?tags=daily%7Cops&filter%5Bstatus%5D=open&filter%5Bowner%5D=alice"
+    );
+  });
+
+  it("uses operation-level server URL override when executing commands", async () => {
+    const localDir = `${cwd}/.ocli`;
+    const profilesPath = `${localDir}/profiles.ini`;
+    const cachePath = `${localDir}/specs/server-override-api.json`;
+
+    const spec = {
+      openapi: "3.0.0",
+      servers: [{ url: "https://root.example.com/api" }],
+      paths: {
+        "/messages": {
+          get: {
+            servers: [{ url: "https://ops.example.com/custom" }],
+            summary: "List messages",
+          },
+        },
+      },
+    };
+
+    const iniContent = [
+      "[server-override-api]",
+      "api_base_url = https://fallback.example.com",
+      "api_basic_auth = ",
+      "api_bearer_token = tok",
+      "openapi_spec_source = /spec.json",
+      `openapi_spec_cache = ${cachePath}`,
+      "include_endpoints = ",
+      "exclude_endpoints = ",
+      "",
+    ].join("\n");
+
+    const capturedConfigs: unknown[] = [];
+    const fakeHttpClient: HttpClient = {
+      request: async (config: any) => {
+        capturedConfigs.push(config);
+        return { status: 200, statusText: "OK", headers: {}, config, data: { ok: true } };
+      },
+    };
+
+    const { profileStore, openapiLoader } = createCliDeps(cwd, homeDir, {
+      [profilesPath]: iniContent,
+      [cachePath]: JSON.stringify(spec),
+      [`${localDir}/current`]: "server-override-api",
+    });
+
+    await run(
+      ["messages"],
+      { cwd, profileStore, openapiLoader, httpClient: fakeHttpClient, stdout: () => {} }
+    );
+
+    const config = capturedConfigs[0] as { url: string };
+    expect(config.url).toBe("https://ops.example.com/custom/messages");
+  });
+
   it("sends custom headers from profile in API requests", async () => {
     const localDir = `${cwd}/.ocli`;
     const profilesPath = `${localDir}/profiles.ini`;
