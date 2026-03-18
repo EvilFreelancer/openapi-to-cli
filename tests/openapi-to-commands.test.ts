@@ -321,4 +321,46 @@ describe("OpenapiToCommands", () => {
       "path:file_id",
     ]);
   });
+
+  it("extracts serialization metadata and effective server URL", () => {
+    const spec: OpenapiSpecLike = {
+      openapi: "3.0.0",
+      servers: [{ url: "https://root.example.com/api" }],
+      paths: {
+        "/reports/{report_id}": {
+          servers: [{ url: "/v2" }],
+          get: {
+            servers: [{ url: "https://ops.example.com/custom" }],
+            parameters: [
+              {
+                name: "report_id",
+                in: "path",
+                required: true,
+                schema: { type: "array" },
+                style: "label",
+                explode: true,
+              },
+              {
+                name: "filters",
+                in: "query",
+                schema: { type: "object" },
+                style: "deepObject",
+                explode: true,
+              },
+            ],
+          },
+        },
+      },
+    };
+
+    const commands = openapiToCommands.buildCommands(spec, baseProfile);
+    expect(commands).toHaveLength(1);
+    expect(commands[0].serverUrl).toBe("https://ops.example.com/custom");
+
+    const reportId = commands[0].options.find((o) => o.name === "report_id");
+    const filters = commands[0].options.find((o) => o.name === "filters");
+    expect(reportId?.style).toBe("label");
+    expect(reportId?.explode).toBe(true);
+    expect(filters?.style).toBe("deepObject");
+  });
 });

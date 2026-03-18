@@ -77,6 +77,16 @@ npx openapi-to-cli onboard \
 
 In practice this improves compatibility with APIs that define inputs outside simple path/query parameters, especially for `POST`, `PUT`, and `PATCH` operations.
 
+### Better request generation
+
+`ocli` now uses more request metadata from the specification when building real HTTP calls:
+
+- query and path parameter serialization from OpenAPI / Swagger metadata
+- support for array and object-style query parameters such as `deepObject`, `pipeDelimited`, and Swagger 2 collection formats
+- operation-level and path-level server overrides when the spec defines different targets for different endpoints
+
+In practice this improves compatibility with APIs that rely on non-trivial parameter encoding or per-operation server definitions.
+
 ### Command search
 
 ```bash

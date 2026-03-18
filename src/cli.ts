@@ -229,26 +229,25 @@ function buildRequestUrl(profile: Profile, command: CliCommand, flags: Record<st
       const value = flags[opt.name];
       if (value !== undefined) {
         const token = `{${opt.name}}`;
-        pathValue = pathValue.replace(token, encodeURIComponent(value));
+        pathValue = pathValue.replace(token, serializePathParameter(opt, value));
       }
     });
 
-  const baseUrl = profile.apiBaseUrl.replace(/\/+$/, "");
-  let url = `${baseUrl}${pathValue}`;
+  const baseUrl = (command.serverUrl ?? profile.apiBaseUrl).replace(/\/+$/, "");
+  let url = baseUrl ? `${baseUrl}${pathValue}` : pathValue;
 
-  const queryParams = new URLSearchParams();
+  const queryParts: string[] = [];
   command.options
     .filter((opt) => opt.location === "query")
     .forEach((opt) => {
       const value = flags[opt.name];
       if (value !== undefined) {
-        queryParams.set(opt.name, value);
+        queryParts.push(...serializeQueryParameter(opt, value));
       }
     });
 
-  const queryString = queryParams.toString();
-  if (queryString) {
-    url += url.includes("?") ? `&${queryString}` : `?${queryString}`;
+  if (queryParts.length > 0) {
+    url += url.includes("?") ? `&${queryParts.join("&")}` : `?${queryParts.join("&")}`;
   }
 
   return url;
@@ -351,6 +350,129 @@ function buildRequestPayload(
   return {};
 }
 
+function serializePathParameter(option: CliCommandOption, rawValue: string): string {
+  const value = parseStructuredParameterValue(option, rawValue);
+
+  if (Array.isArray(value)) {
+    const encoded = value.map((item) => encodeURIComponent(String(item)));
+    const style = option.style ?? "simple";
+    const explode = option.explode ?? false;
+
+    if (style === "label") {
+      return explode ? `.${encoded.join(".")}` : `.${encoded.join(",")}`;
+    }
+
+    if (style === "matrix") {
+      return explode
+        ? encoded.map((item) => `;${encodeURIComponent(option.name)}=${item}`).join("")
+        : `;${encodeURIComponent(option.name)}=${encoded.join(",")}`;
+    }
+
+    return encoded.join(",");
+  }
+
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>).map(
+      ([key, item]) => [encodeURIComponent(key), encodeURIComponent(String(item))] as const
+    );
+    const style = option.style ?? "simple";
+    const explode = option.explode ?? false;
+
+    if (style === "label") {
+      return explode
+        ? `.${entries.map(([key, item]) => `${key}=${item}`).join(".")}`
+        : `.${entries.flat().join(",")}`;
+    }
+
+    if (style === "matrix") {
+      return explode
+        ? entries.map(([key, item]) => `;${key}=${item}`).join("")
+        : `;${encodeURIComponent(option.name)}=${entries.flat().join(",")}`;
+    }
+
+    return explode
+      ? entries.map(([key, item]) => `${key}=${item}`).join(",")
+      : entries.flat().join(",");
+  }
+
+  return encodeURIComponent(String(value));
+}
+
+function serializeQueryParameter(option: CliCommandOption, rawValue: string): string[] {
+  const value = parseStructuredParameterValue(option, rawValue);
+  const encodedName = encodeURIComponent(option.name);
+
+  if (Array.isArray(value)) {
+    const encodedValues = value.map((item) => encodeURIComponent(String(item)));
+
+    if (option.collectionFormat === "multi") {
+      return encodedValues.map((item) => `${encodedName}=${item}`);
+    }
+
+    const joiner = option.collectionFormat === "ssv"
+      ? " "
+      : option.collectionFormat === "tsv"
+        ? "\t"
+        : option.collectionFormat === "pipes"
+          ? "|"
+          : option.style === "spaceDelimited"
+            ? " "
+            : option.style === "pipeDelimited"
+              ? "|"
+              : ",";
+
+    const explode = option.collectionFormat
+      ? option.collectionFormat === "multi"
+      : option.explode ?? true;
+
+    if (explode && joiner === ",") {
+      return encodedValues.map((item) => `${encodedName}=${item}`);
+    }
+
+    return [`${encodedName}=${encodedValues.join(encodeURIComponent(joiner))}`];
+  }
+
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>).map(
+      ([key, item]) => [encodeURIComponent(key), encodeURIComponent(String(item))] as const
+    );
+    const style = option.style ?? "form";
+    const explode = option.explode ?? true;
+
+    if (style === "deepObject") {
+      return entries.map(([key, item]) => `${encodedName}%5B${key}%5D=${item}`);
+    }
+
+    if (explode) {
+      return entries.map(([key, item]) => `${key}=${item}`);
+    }
+
+    return [`${encodedName}=${entries.flat().join(",")}`];
+  }
+
+  return [`${encodedName}=${encodeURIComponent(String(value))}`];
+}
+
+function parseStructuredParameterValue(option: CliCommandOption, rawValue: string): unknown {
+  if (option.schemaType === "array") {
+    const trimmed = rawValue.trim();
+    if (trimmed.startsWith("[")) {
+      return parseBodyFlagValue(rawValue);
+    }
+    return rawValue.split(",").map((item) => item.trim()).filter((item) => item.length > 0);
+  }
+
+  if (option.schemaType === "object") {
+    const trimmed = rawValue.trim();
+    if (!trimmed.startsWith("{")) {
+      throw new Error(`Object parameter --${option.name} expects JSON object value`);
+    }
+    return parseBodyFlagValue(rawValue);
+  }
+
+  return rawValue;
+}
+
 export async function run(argv: string[], options?: RunOptions): Promise<void> {
   const cwd = options?.cwd ?? process.cwd();
   const configLocator = options?.configLocator ?? new ConfigLocator();
@@ -411,7 +533,11 @@ export async function run(argv: string[], options?: RunOptions): Promise<void> {
 
   const addProfileOptions = (y: ReturnType<typeof yargs>) =>
     y
-      .option("api-base-url", { type: "string", demandOption: true })
+      .option("api-base-url", {
+        type: "string",
+        demandOption: true,
+        description: "Base URL for API requests.",
+      })
       .option("openapi-spec", { type: "string", demandOption: true })
       .option("api-basic-auth", { type: "string", default: "" })
       .option("api-bearer-token", { type: "string", default: "" })
