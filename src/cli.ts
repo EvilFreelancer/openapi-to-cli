@@ -151,28 +151,20 @@ async function runApiCommand(
   }
 
   const url = buildRequestUrl(profile, command, flags);
-  const headers = buildHeaders(profile);
-
-  const knownOptionNames = new Set(command.options.map((o) => o.name));
-  const body: Record<string, unknown> = {};
-
-  Object.keys(flags).forEach((key) => {
-    if (!knownOptionNames.has(key)) {
-      body[key] = parseBodyFlagValue(flags[key]);
-    }
-  });
+  const headers = buildHeaders(profile, command, flags);
+  const payload = buildRequestPayload(command, flags);
 
   const method = command.method.toUpperCase();
-  const hasBody = Object.keys(body).length > 0 && (method === "POST" || method === "PUT" || method === "PATCH");
+  const hasBody = payload.data !== undefined;
 
   const requestConfig: AxiosRequestConfig = {
     method,
     url,
     headers: {
       ...headers,
-      ...(hasBody ? { "Content-Type": "application/json" } : {}),
+      ...(hasBody && payload.contentType ? { "Content-Type": payload.contentType } : {}),
     },
-    ...(hasBody ? { data: body } : {}),
+    ...(hasBody ? { data: payload.data } : {}),
   };
 
   const response = await httpClient.request(requestConfig);
@@ -262,7 +254,7 @@ function buildRequestUrl(profile: Profile, command: CliCommand, flags: Record<st
   return url;
 }
 
-function buildHeaders(profile: Profile): Record<string, string> {
+function buildHeaders(profile: Profile, command: CliCommand, flags: Record<string, string>): Record<string, string> {
   const headers: Record<string, string> = {};
 
   if (profile.customHeaders) {
@@ -276,7 +268,87 @@ function buildHeaders(profile: Profile): Record<string, string> {
     headers.Authorization = `Bearer ${profile.apiBearerToken}`;
   }
 
+  const cookiePairs: string[] = [];
+  command.options
+    .filter((opt) => opt.location === "header" || opt.location === "cookie")
+    .forEach((opt) => {
+      const value = flags[opt.name];
+      if (value === undefined) {
+        return;
+      }
+
+      if (opt.location === "header") {
+        headers[opt.name] = value;
+        return;
+      }
+
+      cookiePairs.push(`${encodeURIComponent(opt.name)}=${encodeURIComponent(value)}`);
+    });
+
+  if (cookiePairs.length > 0) {
+    headers.Cookie = cookiePairs.join("; ");
+  }
+
   return headers;
+}
+
+function buildRequestPayload(
+  command: CliCommand,
+  flags: Record<string, string>
+): {
+  data?: unknown;
+  contentType?: string;
+} {
+  const knownOptionNames = new Set(command.options.map((o) => o.name));
+  const bodyOptions = command.options.filter((opt) => opt.location === "body");
+  const formOptions = command.options.filter((opt) => opt.location === "formData");
+  const extraBodyEntries = Object.entries(flags)
+    .filter(([key]) => !knownOptionNames.has(key))
+    .map(([key, value]) => [key, parseBodyFlagValue(value)] as const);
+
+  if (bodyOptions.length === 1 && bodyOptions[0].name === "body" && flags.body !== undefined) {
+    return {
+      data: parseBodyFlagValue(flags.body),
+      contentType: command.requestContentType ?? "application/json",
+    };
+  }
+
+  if (formOptions.length > 0) {
+    const formEntries = formOptions
+      .filter((opt) => flags[opt.name] !== undefined)
+      .map((opt) => [opt.name, String(flags[opt.name])] as const);
+
+    if (formEntries.length === 0) {
+      return {};
+    }
+
+    if (command.requestContentType === "application/x-www-form-urlencoded") {
+      const params = new URLSearchParams();
+      formEntries.forEach(([key, value]) => params.append(key, value));
+      return {
+        data: params,
+        contentType: "application/x-www-form-urlencoded",
+      };
+    }
+
+    return {
+      data: Object.fromEntries(formEntries),
+      contentType: command.requestContentType ?? "multipart/form-data",
+    };
+  }
+
+  const declaredBodyEntries = bodyOptions
+    .filter((opt) => flags[opt.name] !== undefined)
+    .map((opt) => [opt.name, parseBodyFlagValue(flags[opt.name])] as const);
+
+  if (declaredBodyEntries.length > 0 || extraBodyEntries.length > 0) {
+    return {
+      data: Object.fromEntries([...declaredBodyEntries, ...extraBodyEntries]),
+      contentType: command.requestContentType ?? "application/json",
+    };
+  }
+
+  return {};
 }
 
 export async function run(argv: string[], options?: RunOptions): Promise<void> {

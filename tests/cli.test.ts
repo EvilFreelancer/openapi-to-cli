@@ -750,6 +750,204 @@ describe("cli", () => {
     ).rejects.toThrow("Invalid JSON body value");
   });
 
+  it("builds JSON request body from declared OAS3 requestBody properties", async () => {
+    const localDir = `${cwd}/.ocli`;
+    const profilesPath = `${localDir}/profiles.ini`;
+    const cachePath = `${localDir}/specs/oas3-body-api.json`;
+
+    const spec = {
+      openapi: "3.0.0",
+      components: {
+        parameters: {
+          RepoSlug: {
+            name: "repo_slug",
+            in: "path",
+            required: true,
+            schema: { type: "string" },
+          },
+        },
+      },
+      paths: {
+        "/repos/{repo_slug}/dispatch": {
+          parameters: [
+            { $ref: "#/components/parameters/RepoSlug" },
+          ],
+          post: {
+            requestBody: {
+              required: true,
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    required: ["event_type"],
+                    properties: {
+                      event_type: { type: "string" },
+                      draft: { type: "boolean" },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+
+    const iniContent = [
+      "[oas3-body-api]",
+      "api_base_url = https://api.example.com",
+      "api_basic_auth = ",
+      "api_bearer_token = tok",
+      "openapi_spec_source = /spec.json",
+      `openapi_spec_cache = ${cachePath}`,
+      "include_endpoints = ",
+      "exclude_endpoints = ",
+      "",
+    ].join("\n");
+
+    const capturedConfigs: unknown[] = [];
+    const fakeHttpClient: HttpClient = {
+      request: async (config: any) => {
+        capturedConfigs.push(config);
+        return { status: 200, statusText: "OK", headers: {}, config, data: { ok: true } };
+      },
+    };
+
+    const { profileStore, openapiLoader } = createCliDeps(cwd, homeDir, {
+      [profilesPath]: iniContent,
+      [cachePath]: JSON.stringify(spec),
+      [`${localDir}/current`]: "oas3-body-api",
+    });
+
+    await run(
+      [
+        "repos_repo_slug_dispatch",
+        "--repo_slug", "hello",
+        "--event_type", "deploy",
+        "--draft", "true",
+      ],
+      { cwd, profileStore, openapiLoader, httpClient: fakeHttpClient, stdout: () => {} }
+    );
+
+    const config = capturedConfigs[0] as { headers: Record<string, string>; data: Record<string, unknown> };
+    expect(config.headers["Content-Type"]).toBe("application/json");
+    expect(config.data).toEqual({
+      event_type: "deploy",
+      draft: true,
+    });
+  });
+
+  it("builds Swagger 2 form payload from formData parameters", async () => {
+    const localDir = `${cwd}/.ocli`;
+    const profilesPath = `${localDir}/profiles.ini`;
+    const cachePath = `${localDir}/specs/swagger-form-api.json`;
+
+    const spec = {
+      swagger: "2.0",
+      paths: {
+        "/uploads": {
+          post: {
+            consumes: ["application/x-www-form-urlencoded"],
+            parameters: [
+              { name: "title", in: "formData", required: true, type: "string" },
+              { name: "draft", in: "formData", required: false, type: "string" },
+            ],
+          },
+        },
+      },
+    };
+
+    const iniContent = [
+      "[swagger-form-api]",
+      "api_base_url = https://api.example.com",
+      "api_basic_auth = ",
+      "api_bearer_token = tok",
+      "openapi_spec_source = /spec.json",
+      `openapi_spec_cache = ${cachePath}`,
+      "include_endpoints = ",
+      "exclude_endpoints = ",
+      "",
+    ].join("\n");
+
+    const capturedConfigs: unknown[] = [];
+    const fakeHttpClient: HttpClient = {
+      request: async (config: any) => {
+        capturedConfigs.push(config);
+        return { status: 200, statusText: "OK", headers: {}, config, data: { ok: true } };
+      },
+    };
+
+    const { profileStore, openapiLoader } = createCliDeps(cwd, homeDir, {
+      [profilesPath]: iniContent,
+      [cachePath]: JSON.stringify(spec),
+      [`${localDir}/current`]: "swagger-form-api",
+    });
+
+    await run(
+      ["uploads", "--title", "Quarterly report", "--draft", "yes"],
+      { cwd, profileStore, openapiLoader, httpClient: fakeHttpClient, stdout: () => {} }
+    );
+
+    const config = capturedConfigs[0] as { headers: Record<string, string>; data: URLSearchParams };
+    expect(config.headers["Content-Type"]).toBe("application/x-www-form-urlencoded");
+    expect(config.data.toString()).toBe("title=Quarterly+report&draft=yes");
+  });
+
+  it("injects header and cookie parameters into the request", async () => {
+    const localDir = `${cwd}/.ocli`;
+    const profilesPath = `${localDir}/profiles.ini`;
+    const cachePath = `${localDir}/specs/headers-and-cookies-api.json`;
+
+    const spec = {
+      openapi: "3.0.0",
+      paths: {
+        "/me": {
+          get: {
+            parameters: [
+              { name: "X-Request-Id", in: "header", required: true, schema: { type: "string" } },
+              { name: "session_id", in: "cookie", required: true, schema: { type: "string" } },
+            ],
+          },
+        },
+      },
+    };
+
+    const iniContent = [
+      "[headers-and-cookies-api]",
+      "api_base_url = https://api.example.com",
+      "api_basic_auth = ",
+      "api_bearer_token = tok",
+      "openapi_spec_source = /spec.json",
+      `openapi_spec_cache = ${cachePath}`,
+      "include_endpoints = ",
+      "exclude_endpoints = ",
+      "",
+    ].join("\n");
+
+    const capturedConfigs: unknown[] = [];
+    const fakeHttpClient: HttpClient = {
+      request: async (config: any) => {
+        capturedConfigs.push(config);
+        return { status: 200, statusText: "OK", headers: {}, config, data: { ok: true } };
+      },
+    };
+
+    const { profileStore, openapiLoader } = createCliDeps(cwd, homeDir, {
+      [profilesPath]: iniContent,
+      [cachePath]: JSON.stringify(spec),
+      [`${localDir}/current`]: "headers-and-cookies-api",
+    });
+
+    await run(
+      ["me", "--X-Request-Id", "req-123", "--session_id", "cookie-abc"],
+      { cwd, profileStore, openapiLoader, httpClient: fakeHttpClient, stdout: () => {} }
+    );
+
+    const config = capturedConfigs[0] as { headers: Record<string, string> };
+    expect(config.headers["X-Request-Id"]).toBe("req-123");
+    expect(config.headers.Cookie).toBe("session_id=cookie-abc");
+  });
+
   it("sends custom headers from profile in API requests", async () => {
     const localDir = `${cwd}/.ocli`;
     const profilesPath = `${localDir}/profiles.ini`;
