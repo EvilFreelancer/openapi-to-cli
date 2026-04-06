@@ -1373,4 +1373,69 @@ describe("cli", () => {
     expect(profile?.customHeaders).toEqual({ "X-Custom-Id": "abc123", "X-Tenant": "myorg" });
     expect(profile?.commandPrefix).toBe("");
   });
+
+  it.each([
+    {
+      label: "swagger 2.0 host",
+      spec: { swagger: "2.0", host: "gitlab.com", basePath: "/api/v4", schemes: ["https"], paths: { "/version": { get: { summary: "v" } } } },
+      cmd: "version",
+    },
+    {
+      label: "openapi 3.0 root servers",
+      spec: { openapi: "3.0.0", servers: [{ url: "https://public.example.com/api" }], paths: { "/status": { get: { summary: "s" } } } },
+      cmd: "status",
+    },
+  ])("profile apiBaseUrl takes priority over $label", async ({ spec, cmd }) => {
+    const localDir = `${cwd}/.ocli`;
+    const cachePath = `${localDir}/specs/p.json`;
+    const capturedConfigs: unknown[] = [];
+    const fakeHttpClient: HttpClient = {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      request: async (config: any) => {
+        capturedConfigs.push(config);
+        return { status: 200, statusText: "OK", headers: {}, config, data: {} };
+      },
+    };
+    const { profileStore, openapiLoader } = createCliDeps(cwd, homeDir, {
+      [`${localDir}/profiles.ini`]: ["[p]", "api_base_url = https://self-hosted.example.com", `openapi_spec_cache = ${cachePath}`, ""].join("\n"),
+      [cachePath]: JSON.stringify(spec),
+      [`${localDir}/current`]: "p",
+    });
+
+    await run([cmd], { cwd, profileStore, openapiLoader, httpClient: fakeHttpClient, stdout: () => {} });
+
+    const config = capturedConfigs[0] as { url: string };
+    expect(config.url).toContain("self-hosted.example.com");
+    expect(config.url).not.toContain("gitlab.com");
+    expect(config.url).not.toContain("public.example.com");
+  });
+
+  it("path-level servers override profile apiBaseUrl", async () => {
+    const localDir = `${cwd}/.ocli`;
+    const cachePath = `${localDir}/specs/ps.json`;
+    const spec = {
+      openapi: "3.0.0",
+      servers: [{ url: "https://root.example.com" }],
+      paths: { "/data": { servers: [{ url: "https://path-override.example.com" }], get: { summary: "d" } } },
+    };
+
+    const capturedConfigs: unknown[] = [];
+    const fakeHttpClient: HttpClient = {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      request: async (config: any) => {
+        capturedConfigs.push(config);
+        return { status: 200, statusText: "OK", headers: {}, config, data: {} };
+      },
+    };
+    const { profileStore, openapiLoader } = createCliDeps(cwd, homeDir, {
+      [`${localDir}/profiles.ini`]: ["[ps]", "api_base_url = https://profile.example.com", `openapi_spec_cache = ${cachePath}`, ""].join("\n"),
+      [cachePath]: JSON.stringify(spec),
+      [`${localDir}/current`]: "ps",
+    });
+
+    await run(["data"], { cwd, profileStore, openapiLoader, httpClient: fakeHttpClient, stdout: () => {} });
+
+    const config = capturedConfigs[0] as { url: string };
+    expect(config.url).toBe("https://path-override.example.com/data");
+  });
 });

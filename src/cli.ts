@@ -247,7 +247,11 @@ function buildRequestUrl(profile: Profile, command: CliCommand, flags: Record<st
       }
     });
 
-  const baseUrl = (command.serverUrl ?? profile.apiBaseUrl).replace(/\/+$/, "");
+  const baseUrl = (
+    command.serverUrlOverridesProfile
+      ? command.serverUrl ?? ""
+      : profile.apiBaseUrl || command.serverUrl || ""
+  ).replace(/\/+$/, "");
   let url = baseUrl ? `${baseUrl}${pathValue}` : pathValue;
 
   const queryParts: string[] = [];
