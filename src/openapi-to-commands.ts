@@ -25,6 +25,7 @@ export interface CliCommand {
   description?: string;
   requestContentType?: string;
   serverUrl?: string;
+  serverUrlOverridesProfile?: boolean;
 }
 
 type HttpMethod = "get" | "post" | "put" | "delete" | "patch" | "head" | "options" | "trace";
@@ -185,7 +186,7 @@ export class OpenapiToCommands {
         const name = multipleMethods ? `${baseName}_${op.method}` : baseName;
         const { options, requestContentType } = this.extractOptions(op, spec);
         const description = op.operation.summary ?? op.operation.description;
-        const serverUrl = this.resolveOperationServerUrl(spec, op);
+        const resolved = this.resolveOperationServerUrl(spec, op);
 
         commands.push({
           name,
@@ -194,7 +195,8 @@ export class OpenapiToCommands {
           options,
           description,
           requestContentType,
-          serverUrl,
+          serverUrl: resolved.url,
+          serverUrlOverridesProfile: resolved.overridesProfile,
         });
       }
     }
@@ -540,23 +542,28 @@ export class OpenapiToCommands {
     };
   }
 
-  private resolveOperationServerUrl(spec: OpenapiSpecLike, op: PathOperation): string | undefined {
+  private resolveOperationServerUrl(
+    spec: OpenapiSpecLike,
+    op: PathOperation
+  ): { url?: string; overridesProfile?: boolean } {
     const rootBase = this.resolveServers(Array.isArray(spec?.servers) ? spec.servers : undefined);
+
     const operationServer = this.resolveServers(op.operation.servers, rootBase);
     if (operationServer) {
-      return operationServer;
+      return { url: operationServer, overridesProfile: true };
     }
 
     const pathServer = this.resolveServers(op.pathServers, rootBase);
     if (pathServer) {
-      return pathServer;
+      return { url: pathServer, overridesProfile: true };
     }
 
     if (rootBase) {
-      return rootBase;
+      return { url: rootBase, overridesProfile: false };
     }
 
-    return this.resolveSwagger2BaseUrl(spec);
+    const swagger2Base = this.resolveSwagger2BaseUrl(spec);
+    return swagger2Base ? { url: swagger2Base, overridesProfile: false } : {};
   }
 
   private resolveServers(rawServers?: unknown[], relativeTo?: string): string | undefined {
