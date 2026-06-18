@@ -25,6 +25,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -42,21 +44,28 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          # Ensure we are on the right tag ref when triggered by push
+          set -e
           if [ "${{ github.event_name }}" = "push" ]; then
             TAG_REF="${GITHUB_REF#refs/tags/}"
-            echo "Publishing version for tag $TAG_REF"
+            echo "Publishing version for pushed tag $TAG_REF"
           else
             TAG_REF="${{ github.event.inputs.tag || '' }}"
-            echo "Manual publish for tag $TAG_REF (if empty, uses current ref)"
+            if [ -z "$TAG_REF" ]; then
+              git fetch --tags --force
+              TAG_REF=$(git tag -l 'v*' | sort -V | tail -1)
+              echo "No tag input given; falling back to latest tag $TAG_REF"
+            else
+              echo "Manual publish for input tag $TAG_REF"
+            fi
           fi
 
-          if [ -n "$TAG_REF" ]; then
-            VERSION_FROM_TAG="${TAG_REF#v}"
-            echo "Setting package.json version to $VERSION_FROM_TAG based on tag $TAG_REF"
-            npm version "$VERSION_FROM_TAG" --no-git-tag-version
-          else
-            echo "TAG_REF is empty, skipping package.json version update"
+          if [ -z "$TAG_REF" ]; then
+            echo "No tag available to publish; aborting" >&2
+            exit 1
           fi
+
+          VERSION_FROM_TAG="${TAG_REF#v}"
+          echo "Setting package.json version to $VERSION_FROM_TAG (from $TAG_REF)"
+          npm version "$VERSION_FROM_TAG" --no-git-tag-version
 
           npm publish --provenance --access public
