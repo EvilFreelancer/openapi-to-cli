@@ -633,6 +633,12 @@ export async function run(argv: string[], options?: RunOptions): Promise<void> {
     .scriptName("ocli")
     .version(VERSION)
     .exitProcess(false)
+    .fail((msg, err) => {
+      if (err) {
+        throw err;
+      }
+      throw new Error(msg);
+    })
     .command(
       "onboard",
       "Add a new profile (alias for profiles add default)",
