@@ -4,32 +4,52 @@ globs: "**/*.ts"
 alwaysApply: true
 ---
 
-## Code Style Rules
+# Code style (TypeScript)
 
-### General rules
+Applies to every `.ts` file in `src/` and `tests/`.
 
-1. All code comments for this project must be written in English.
-2. All documentation files for this project must be written in English.
-3. New files must end with a single empty line.
-4. Use straight double quotes `"`. Use the regular dash `-` for punctuation, do not use long dashes.
+## General
 
-### TypeScript
+1. All code comments and identifiers in English. Documentation files in English.
+2. New files end with a single trailing newline.
+3. Straight double quotes `"` for string literals. Regular hyphen `-`, not em-dashes, in any English prose inside code or docs.
+4. Default to no comments. Add a comment only when the **why** is non-obvious (workaround, hidden constraint, subtle invariant). Identifiers should carry intent.
 
-- `strict: true` is enabled in `tsconfig.json`.
-- For exported functions and public APIs, prefer explicit parameter and return types.
-- For reusable object shapes, use `interface`.
+## TypeScript
 
-### File structure
+- `strict: true` in `tsconfig.json`. Do not weaken it locally.
+- Exported functions and public APIs declare explicit parameter and return types. Local variables may use inference.
+- Use `interface` for reusable object shapes, `type` for unions, intersections, and mapped types.
+- Avoid `any`. When unavoidable, scope it as narrowly as possible and annotate `// eslint-disable-next-line @typescript-eslint/no-explicit-any` with a one-line reason (see `cli.ts:HttpClient` for the canonical example).
+- Prefer `unknown` over `any` at module boundaries; narrow with type guards.
 
-1. Imports first (Node/third-party, then local).
-2. Then constants and types.
-3. Then main logic (functions, classes, exports).
+## File structure
 
-### Naming
+1. Imports first - Node built-ins (`path`, `fs`), then third-party (`axios`, `yargs`, `js-yaml`, `zod`, `ini`), then local relative imports.
+2. Types and interfaces.
+3. Module-level constants.
+4. Functions and classes.
+5. `export` last when it improves readability; `export class` / `export function` inline is also fine.
 
-- Classes - PascalCase.
-- Functions and methods - camelCase.
-- Configuration constants - UPPER_SNAKE_CASE or meaningful camelCase names.
-- Files - kebab-case or camelCase, consistent with existing files.
+## Naming
 
+- Classes - `PascalCase` (`ProfileStore`, `OpenapiLoader`, `CommandSearch`).
+- Functions and methods - `camelCase` (`loadSpec`, `buildCommands`, `selectProfile`).
+- Interfaces and type aliases - `PascalCase` (`Profile`, `CliCommand`, `HttpClient`).
+- Constants - `UPPER_SNAKE_CASE` for environment-style globals, otherwise meaningful `camelCase`.
+- Files - `kebab-case.ts` matching the dominant exported type (`profile-store.ts` exports `ProfileStore`).
 
+## Error handling
+
+- Throw `Error` subclasses with informative messages; never throw strings.
+- At the CLI boundary (`cli.ts`), catch and translate to a user-friendly message + non-zero exit code. Inner layers should let exceptions propagate.
+- For external input (HTTP responses, parsed YAML/JSON), validate with `zod` schemas before consuming.
+
+## Async
+
+- Prefer `async/await`. Avoid `.then()` chains in new code.
+- Don't fire-and-forget Promises; always `await` or explicitly handle.
+
+## Testing-facing affordances
+
+When a module performs I/O, accept the dependency via a constructor option (`fs`, `httpClient`, `stdout`). This is how `OpenapiLoader`, `ProfileStore`, and the `run()` entry in `cli.ts` are structured; follow the same pattern in new modules.

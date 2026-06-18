@@ -1438,4 +1438,249 @@ describe("cli", () => {
     const config = capturedConfigs[0] as { url: string };
     expect(config.url).toBe("https://path-override.example.com/data");
   });
+
+  describe("--profile/-p flag", () => {
+    function createTwoProfileDeps() {
+      const localDir = `${cwd}/.ocli`;
+      const profilesPath = `${localDir}/profiles.ini`;
+      const cacheA = `${localDir}/specs/api-a.json`;
+      const cacheB = `${localDir}/specs/api-b.json`;
+
+      const specA = {
+        openapi: "3.0.0",
+        paths: {
+          "/ping": { get: { summary: "Ping A" } },
+        },
+      };
+      const specB = {
+        openapi: "3.0.0",
+        paths: {
+          "/ping": { get: { summary: "Ping B" } },
+          "/only-b": { get: { summary: "Only available on B" } },
+        },
+      };
+
+      const iniContent = [
+        "[api-a]",
+        "api_base_url = https://a.example.com",
+        "api_basic_auth = ",
+        "api_bearer_token = ",
+        "openapi_spec_source = /spec-a.json",
+        `openapi_spec_cache = ${cacheA}`,
+        "include_endpoints = ",
+        "exclude_endpoints = ",
+        "",
+        "[api-b]",
+        "api_base_url = https://b.example.com",
+        "api_basic_auth = ",
+        "api_bearer_token = ",
+        "openapi_spec_source = /spec-b.json",
+        `openapi_spec_cache = ${cacheB}`,
+        "include_endpoints = ",
+        "exclude_endpoints = ",
+        "",
+      ].join("\n");
+
+      const capturedConfigs: unknown[] = [];
+      const fakeHttpClient: HttpClient = {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        request: async (config: any) => {
+          capturedConfigs.push(config);
+          return { status: 200, statusText: "OK", headers: {}, config, data: { ok: true } };
+        },
+      };
+
+      const { profileStore, openapiLoader } = createCliDeps(cwd, homeDir, {
+        [profilesPath]: iniContent,
+        [cacheA]: JSON.stringify(specA),
+        [cacheB]: JSON.stringify(specB),
+        [`${localDir}/current`]: "api-a",
+      });
+
+      return { profileStore, openapiLoader, fakeHttpClient, capturedConfigs };
+    }
+
+    it("uses --profile to override the current profile when invoking an API command", async () => {
+      const { profileStore, openapiLoader, fakeHttpClient, capturedConfigs } = createTwoProfileDeps();
+
+      await run(["ping", "--profile", "api-b"], {
+        cwd,
+        profileStore,
+        openapiLoader,
+        httpClient: fakeHttpClient,
+        stdout: () => {},
+      });
+
+      expect(capturedConfigs).toHaveLength(1);
+      const config = capturedConfigs[0] as { url: string };
+      expect(config.url).toBe("https://b.example.com/ping");
+    });
+
+    it("uses -p short alias to override the current profile", async () => {
+      const { profileStore, openapiLoader, fakeHttpClient, capturedConfigs } = createTwoProfileDeps();
+
+      await run(["ping", "-p", "api-b"], {
+        cwd,
+        profileStore,
+        openapiLoader,
+        httpClient: fakeHttpClient,
+        stdout: () => {},
+      });
+
+      expect(capturedConfigs).toHaveLength(1);
+      const config = capturedConfigs[0] as { url: string };
+      expect(config.url).toBe("https://b.example.com/ping");
+    });
+
+    it("resolves an endpoint only present in the overridden profile", async () => {
+      const { profileStore, openapiLoader, fakeHttpClient, capturedConfigs } = createTwoProfileDeps();
+
+      await run(["only-b", "--profile", "api-b"], {
+        cwd,
+        profileStore,
+        openapiLoader,
+        httpClient: fakeHttpClient,
+        stdout: () => {},
+      });
+
+      expect(capturedConfigs).toHaveLength(1);
+      const config = capturedConfigs[0] as { url: string };
+      expect(config.url).toBe("https://b.example.com/only-b");
+    });
+
+    it("falls back to the current profile when --profile is omitted", async () => {
+      const { profileStore, openapiLoader, fakeHttpClient, capturedConfigs } = createTwoProfileDeps();
+
+      await run(["ping"], {
+        cwd,
+        profileStore,
+        openapiLoader,
+        httpClient: fakeHttpClient,
+        stdout: () => {},
+      });
+
+      expect(capturedConfigs).toHaveLength(1);
+      const config = capturedConfigs[0] as { url: string };
+      expect(config.url).toBe("https://a.example.com/ping");
+    });
+
+    it("throws a clear error when --profile names a profile that does not exist", async () => {
+      const { profileStore, openapiLoader, fakeHttpClient } = createTwoProfileDeps();
+
+      await expect(
+        run(["ping", "--profile", "missing-profile"], {
+          cwd,
+          profileStore,
+          openapiLoader,
+          httpClient: fakeHttpClient,
+          stdout: () => {},
+        })
+      ).rejects.toThrow("Profile not found: missing-profile");
+    });
+
+    it("does not leak --profile flag into request body or query parameters", async () => {
+      const { profileStore, openapiLoader, fakeHttpClient, capturedConfigs } = createPostApiDeps();
+
+      await run(
+        [
+          "org_slug_repo_slug_ci_workflows_workflow_name_trigger",
+          "--profile", "body-api",
+          "--org_slug", "myorg",
+          "--repo_slug", "myrepo",
+          "--workflow_name", "deploy",
+          "--revision", "main",
+        ],
+        { cwd, profileStore, openapiLoader, httpClient: fakeHttpClient, stdout: () => {} }
+      );
+
+      expect(capturedConfigs).toHaveLength(1);
+      const config = capturedConfigs[0] as { url: string; data: Record<string, unknown> };
+      expect(config.url).not.toContain("profile=");
+      expect(config.url).not.toContain("body-api");
+      expect(config.data).toEqual({ revision: "main" });
+    });
+
+    it("does not leak -p short alias into request body or query parameters", async () => {
+      const { profileStore, openapiLoader, fakeHttpClient, capturedConfigs } = createPostApiDeps();
+
+      await run(
+        [
+          "org_slug_repo_slug_ci_workflows_workflow_name_trigger",
+          "-p", "body-api",
+          "--org_slug", "myorg",
+          "--repo_slug", "myrepo",
+          "--workflow_name", "deploy",
+          "--revision", "main",
+        ],
+        { cwd, profileStore, openapiLoader, httpClient: fakeHttpClient, stdout: () => {} }
+      );
+
+      expect(capturedConfigs).toHaveLength(1);
+      const config = capturedConfigs[0] as { data: Record<string, unknown> };
+      expect(config.data).toEqual({ revision: "main" });
+    });
+
+    it("commands --profile lists commands for the named profile, not the current one", async () => {
+      const { profileStore, openapiLoader } = createTwoProfileDeps();
+      const log: string[] = [];
+
+      await run(["commands", "--profile", "api-b"], {
+        cwd,
+        profileStore,
+        openapiLoader,
+        stdout: (msg: string) => log.push(msg),
+      });
+
+      const out = log.join("");
+      expect(out).toContain("Available commands for profile api-b");
+      expect(out).toContain("only-b");
+      expect(out).toContain("Only available on B");
+    });
+
+    it("commands -p short alias works the same as --profile", async () => {
+      const { profileStore, openapiLoader } = createTwoProfileDeps();
+      const log: string[] = [];
+
+      await run(["commands", "-p", "api-b"], {
+        cwd,
+        profileStore,
+        openapiLoader,
+        stdout: (msg: string) => log.push(msg),
+      });
+
+      const out = log.join("");
+      expect(out).toContain("Available commands for profile api-b");
+      expect(out).toContain("only-b");
+    });
+
+    it("commands --profile errors when the named profile is unknown", async () => {
+      const { profileStore, openapiLoader } = createTwoProfileDeps();
+
+      await expect(
+        run(["commands", "--profile", "missing-profile"], {
+          cwd,
+          profileStore,
+          openapiLoader,
+          stdout: () => {},
+        })
+      ).rejects.toThrow("Profile not found: missing-profile");
+    });
+
+    it("--help for a dynamic API command lists --profile/-p", async () => {
+      const { profileStore, openapiLoader, fakeHttpClient } = createTwoProfileDeps();
+      const log: string[] = [];
+
+      await run(["ping", "--help"], {
+        cwd,
+        profileStore,
+        openapiLoader,
+        httpClient: fakeHttpClient,
+        stdout: (msg: string) => log.push(msg),
+      });
+
+      const out = log.join("");
+      expect(out).toContain("--profile");
+      expect(out).toContain("-p");
+    });
+  });
 });

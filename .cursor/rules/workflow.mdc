@@ -3,64 +3,72 @@ description: Workflow for openapi-to-cli
 alwaysApply: true
 ---
 
-## Workflow Rules
+# Workflow (TDD, layered, docs-aware)
 
-### Documentation
+This file is `alwaysApply: true`, so it loads in every Cursor session (same priority as the top-level project rules).
 
-- Main documentation is `README.md` in the root of `openapi-to-cli`.
-- When changing CLI behavior, profile format or `.ocli` structure, update `README.md`.
-- All documentation for this project must be written in English.
+`openapi-to-cli` (`ocli`) is a TypeScript CLI that turns OpenAPI/Swagger specs into runtime commands. The user-facing surface is the `ocli` binary, `.ocli/` config dir, and `profiles.ini`. Tests live next to source in `tests/` and run with Jest. Behavior is specified by tests; the README documents the public CLI contract.
 
-### New features (TDD)
+## New features (TDD)
 
-When adding new functionality to `openapi-to-cli`:
+When the user asks for a new feature (words like "feature", "add", "implement", "фича", "добавить"), follow this order. Do not skip steps.
 
-1. First write a test in `tests/` (for example for profile parsing or command generation).
-2. Run the test and make sure it fails.
-3. Implement the feature in `src/` following architecture and code-style rules.
-4. Run the test again and make sure it passes.
-5. Run all tests: `npm test` from the `openapi-to-cli` directory.
+1. **Plan**: outline the steps for the change (modules to touch, tests to add). Use a task list if it spans more than 2-3 steps.
+2. **Failing test first**: add or extend a test in `tests/<module>.test.ts`. The test must describe the new behavior in `describe`/`it` and **fail** for the right reason.
+3. **Confirm red**: run only that test: `npx jest tests/<module>.test.ts -t "<title>"`. Confirm it fails as expected.
+4. **Implement**: write the minimum code in `src/` that makes the test pass. Follow @architecture.mdc and @code-style.mdc. When adding new classes, follow @implementation-order.mdc - lower layer first.
+5. **Confirm green**: re-run the same test; it must pass.
+6. **Full suite**: `npm test`. All tests must be green. Fix regressions before moving on.
+7. **Build check**: `npm run build` to confirm `tsc` is clean (no type errors).
+8. **Docs**: update `README.md` whenever any of the following change: CLI flags, command names, profile fields, `.ocli/` layout, BM25 search behavior, supported OpenAPI/Swagger features, or the benchmark numbers. If you changed observable CLI output (`--help`, error messages, exit codes), update the relevant section of the README. The `examples/skill-ocli-api.md` and `skills/ocli-api/SKILL.md` must stay aligned with the documented agent workflow.
+9. **Report**: brief summary of files touched, tests added, suite result.
 
-### Bug fixes (TDD)
+## Bug fixes (TDD)
 
-When fixing a bug:
+When the user reports a bug (words like "bug", "fix", "ошибка", "баг", "исправить"):
 
-1. Write a test that reproduces the bug.
-2. Make sure the test fails.
-3. Fix the code.
-4. Make sure the test passes.
-5. Run all tests.
+1. **Plan** the fix.
+2. **Reproduction test**: add a test in `tests/<module>.test.ts` that reproduces the bug. It must **fail** on the broken code for the right reason.
+3. **Confirm red**: run only that test and confirm it fails.
+4. **Fix**: minimal code change in `src/` to make the test pass; respect existing module boundaries.
+5. **Confirm green**: re-run the regression test.
+6. **Full suite**: `npm test`. All tests green.
+7. **Build check**: `npm run build`.
+8. **Docs**: update `README.md` if the bug affected documented behavior.
+9. **Report**: what was broken, what changed, suite result.
 
-### Tests
+## Before the final answer
 
-- Tests are stored in `tests/` next to `src/`.
-- Test file names: `*.test.ts`.
-- Run tests:
+- `npm test` is green - **always**.
+- `npm run build` is clean.
+- `README.md` reflects any user-visible change.
+- Report what changed, which tests were added, and the suite result.
 
-```bash
-npm test
-```
+## Rules sync (Cursor <-> Claude)
 
-### Rules sync (Cursor <-> Claude)
-
-`.cursor/rules/*.mdc` and `.claude/rules/*.md` cover the same topics and must stay aligned. **Any change to a rule in one location must be mirrored to the other in the same change**, no exceptions.
+`.claude/rules/*.md` and `.cursor/rules/*.mdc` cover the same topics and must stay aligned. **Any change to a rule in one location must be mirrored to the other in the same change**, no exceptions.
 
 Mapping:
 
-| Topic | Cursor | Claude |
+| Topic | Claude | Cursor |
 |-------|--------|--------|
-| Workflow | `.cursor/rules/workflow.mdc` | `.claude/rules/workflow.md` |
-| Architecture | `.cursor/rules/architecture.mdc` | `.claude/rules/architecture.md` |
-| Code style | `.cursor/rules/code-style.mdc` | `.claude/rules/code-style.md` |
-| Testing | `.cursor/rules/testing.mdc` | `.claude/rules/testing.md` |
-| Implementation order | `.cursor/rules/implementation-order.mdc` (create if absent) | `.claude/rules/implementation-order.md` |
+| Workflow | `.claude/rules/workflow.md` | `.cursor/rules/workflow.mdc` |
+| Architecture | `.claude/rules/architecture.md` | `.cursor/rules/architecture.mdc` |
+| Code style | `.claude/rules/code-style.md` | `.cursor/rules/code-style.mdc` |
+| Testing | `.claude/rules/testing.md` | `.cursor/rules/testing.mdc` |
+| Implementation order | `.claude/rules/implementation-order.md` | `.cursor/rules/implementation-order.mdc` (create if absent) |
 
 When propagating, translate the frontmatter:
 
-- Cursor `globs: "src/**/*.ts"` + `alwaysApply: true` -> Claude `paths: ["src/**/*.ts"]`.
-- Cursor `alwaysApply: true` with no `globs` -> Claude rule without frontmatter (loaded every session).
-- Cursor `alwaysApply: false` (optional/topic rule) -> Claude `paths:` narrowed to the relevant tree.
-- Replace cross-rule links: Cursor `@architecture.mdc` -> Claude `[architecture.md](architecture.md)`.
+- Claude `paths: ["src/**/*.ts"]` -> Cursor `globs: "src/**/*.ts"` + `alwaysApply: true` (or `false` for optional topics like `implementation-order`).
+- Claude rule without frontmatter (loaded every session, e.g. `workflow.md`) -> Cursor `alwaysApply: true` with no `globs`.
+- Replace cross-rule links: Claude `[architecture.md](architecture.md)` -> Cursor `@architecture.mdc`.
 
 Body content stays identical. If the change is Cursor-only or Claude-only (very rare - e.g. tool-specific quirk), state that explicitly in the file as "Tool-specific:" and skip mirroring for that section only.
 
+## Relationship to other rules
+
+- @architecture.mdc is loaded under `src/**` - use it when picking modules and dependency direction.
+- @implementation-order.mdc is loaded under `src/**` - use it to decide layer order when adding new classes.
+- @code-style.mdc is loaded for all `.ts` files - applies to both `src/` and `tests/`.
+- @testing.mdc is loaded under `tests/` - applies when writing or editing tests.

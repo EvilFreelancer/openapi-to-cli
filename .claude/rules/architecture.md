@@ -54,7 +54,7 @@ HttpClient (axios)    -> performs the real HTTP request to API_BASE_URL
 4. **Pure transform layer**: `bm25.ts`, `openapi-to-commands.ts`, and `command-search.ts` perform no I/O; they take inputs and return outputs. This keeps them trivially unit-testable.
 5. **Side effects at the edges**: filesystem in `config.ts`/`profile-store.ts`/`openapi-loader.ts`, network in `cli.ts` via `HttpClient`. Inject these via constructors (`fs`, `httpClient`) so tests can swap them.
 6. **TypeScript strict**: `strict: true` in `tsconfig.json`. Explicit types for exported functions and public interfaces.
-7. **No surprise breaking changes**: every CLI-visible change must be reflected in `README.md` and `CHANGELOG.md`.
+7. **No surprise breaking changes**: every CLI-visible change must be reflected in `README.md`.
 
 ## Layers and allowed dependencies
 

@@ -55,7 +55,13 @@ ocli myapi_messages_post --help
 
 # Execute
 ocli myapi_messages_post --text "Hello world"
+
+# Or target a different profile for a single call (no 'use' required)
+ocli myapi_messages_post --profile other --text "Hello world"
+ocli commands -p other --query "send message"
 ```
+
+`--profile` (short `-p`) overrides the profile selected by `ocli use` for this invocation only. It works for both dynamic API commands and `ocli commands`. Place it anywhere after the command name. When omitted, the profile set via `ocli use` is used (falling back to `default`).
 
 Or use `npx` without global install:
 
