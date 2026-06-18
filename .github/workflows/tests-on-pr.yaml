@@ -29,5 +29,8 @@ jobs:
       - name: Build TypeScript
         run: npm run build
 
+      - name: Download test fixtures
+        run: bash tests/fixtures/download.sh
+
       - name: Run tests
         run: npm test
