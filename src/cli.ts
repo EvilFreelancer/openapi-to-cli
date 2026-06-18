@@ -44,6 +44,58 @@ interface AddProfileArgs {
   "custom-headers"?: string;
 }
 
+function extractProfileFlag(args: string[]): { profileName?: string; remaining: string[] } {
+  const remaining: string[] = [];
+  let profileName: string | undefined;
+
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+
+    if (arg === "--profile" || arg === "-p") {
+      if (i + 1 >= args.length) {
+        throw new Error(`Missing value for ${arg}`);
+      }
+      profileName = args[i + 1];
+      i += 1;
+      continue;
+    }
+
+    if (arg.startsWith("--profile=")) {
+      profileName = arg.slice("--profile=".length);
+      continue;
+    }
+
+    if (arg.startsWith("-p=")) {
+      profileName = arg.slice("-p=".length);
+      continue;
+    }
+
+    remaining.push(arg);
+  }
+
+  return { profileName, remaining };
+}
+
+function resolveProfile(
+  profileStore: ProfileStore,
+  cwd: string,
+  overrideName: string | undefined
+): Profile {
+  if (overrideName) {
+    const profile = profileStore.getProfileByName(cwd, overrideName);
+    if (!profile) {
+      throw new Error(`Profile not found: ${overrideName}`);
+    }
+    return profile;
+  }
+
+  const profile = profileStore.getCurrentProfile(cwd);
+  if (!profile) {
+    throw new Error("No current profile configured");
+  }
+  return profile;
+}
+
 async function runApiCommand(
   toolName: string,
   args: string[],
@@ -58,10 +110,8 @@ async function runApiCommand(
   const { cwd, profileStore, openapiLoader, stdout, httpClient } = env;
   const openapiToCommands = new OpenapiToCommands();
 
-  const profile = profileStore.getCurrentProfile(cwd);
-  if (!profile) {
-    throw new Error("No current profile configured");
-  }
+  const { profileName: overrideName, remaining: commandArgs } = extractProfileFlag(args);
+  const profile = resolveProfile(profileStore, cwd, overrideName);
 
   const spec = await openapiLoader.loadSpec(profile);
   const commands = openapiToCommands.buildCommands(spec, profile);
@@ -71,7 +121,7 @@ async function runApiCommand(
     throw new Error(`Command ${toolName} is not available for profile ${profile.name}`);
   }
 
-  if (args.includes("-h") || args.includes("--help")) {
+  if (commandArgs.includes("-h") || commandArgs.includes("--help")) {
     stdout(`ocli ${command.name}\n\n`);
 
     if (command.description) {
@@ -124,6 +174,13 @@ async function runApiCommand(
     });
 
     entries.push({
+      key: "--profile, -p",
+      desc: "(optional) Profile name to use for this call; defaults to the profile selected via 'use'",
+      typeLabel: "string",
+      requiredLabel: "",
+    });
+
+    entries.push({
       key: "-h, --help",
       desc: "Show help",
       typeLabel: "boolean",
@@ -153,7 +210,7 @@ async function runApiCommand(
     return;
   }
 
-  const { flags } = parseArgs(args);
+  const { flags } = parseArgs(commandArgs);
 
   const missingRequired = command.options
     .filter((opt) => opt.required)
@@ -576,6 +633,12 @@ export async function run(argv: string[], options?: RunOptions): Promise<void> {
     .scriptName("ocli")
     .version(VERSION)
     .exitProcess(false)
+    .fail((msg, err) => {
+      if (err) {
+        throw err;
+      }
+      throw new Error(msg);
+    })
     .command(
       "onboard",
       "Add a new profile (alias for profiles add default)",
@@ -661,12 +724,15 @@ export async function run(argv: string[], options?: RunOptions): Promise<void> {
             type: "number",
             default: 10,
             description: "Maximum number of results when using query or regex filters",
+          })
+          .option("profile", {
+            alias: "p",
+            type: "string",
+            description: "Profile name to use (defaults to the profile selected via 'use')",
           }),
       async (args) => {
-        const profile = profileStore.getCurrentProfile(cwd);
-        if (!profile) {
-          throw new Error("No current profile configured");
-        }
+        const overrideName = args.profile as string | undefined;
+        const profile = resolveProfile(profileStore, cwd, overrideName);
         const spec = await openapiLoader.loadSpec(profile);
         const commands = openapiToCommands.buildCommands(spec, profile);
         if (commands.length === 0) {

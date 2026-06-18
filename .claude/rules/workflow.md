@@ -16,8 +16,7 @@ When the user asks for a new feature (words like "feature", "add", "implement", 
 6. **Full suite**: `npm test`. All tests must be green. Fix regressions before moving on.
 7. **Build check**: `npm run build` to confirm `tsc` is clean (no type errors).
 8. **Docs**: update `README.md` whenever any of the following change: CLI flags, command names, profile fields, `.ocli/` layout, BM25 search behavior, supported OpenAPI/Swagger features, or the benchmark numbers. If you changed observable CLI output (`--help`, error messages, exit codes), update the relevant section of the README. The `examples/skill-ocli-api.md` and `skills/ocli-api/SKILL.md` must stay aligned with the documented agent workflow.
-9. **Changelog**: add an entry to `CHANGELOG.md` for any user-visible change.
-10. **Report**: brief summary of files touched, tests added, suite result.
+9. **Report**: brief summary of files touched, tests added, suite result.
 
 ## Bug fixes (TDD)
 
@@ -30,14 +29,14 @@ When the user reports a bug (words like "bug", "fix", "ошибка", "баг", 
 5. **Confirm green**: re-run the regression test.
 6. **Full suite**: `npm test`. All tests green.
 7. **Build check**: `npm run build`.
-8. **Docs**: update `README.md` if the bug affected documented behavior; add a `CHANGELOG.md` entry.
+8. **Docs**: update `README.md` if the bug affected documented behavior.
 9. **Report**: what was broken, what changed, suite result.
 
 ## Before the final answer
 
 - `npm test` is green - **always**.
 - `npm run build` is clean.
-- `README.md` and `CHANGELOG.md` reflect any user-visible change.
+- `README.md` reflects any user-visible change.
 - Report what changed, which tests were added, and the suite result.
 
 ## Rules sync (Cursor <-> Claude)

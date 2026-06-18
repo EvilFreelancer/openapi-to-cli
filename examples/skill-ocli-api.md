@@ -61,10 +61,22 @@ ocli resources_post --name "New Resource" --description "Details"
 3. Execute the command with required parameters
 4. Parse the JSON response for the information needed
 
+## Multiple APIs
+
+```bash
+# Switch the default profile permanently
+ocli use github
+
+# Or override the profile for a single call (short alias: -p)
+ocli repos_get --profile github --owner octocat --repo Hello-World
+ocli commands -p github --query "list pull requests"
+```
+
 ## Tips
 
 - All responses are JSON — pipe through `jq` for filtering
 - Path parameters (like `{id}`) are passed as `--id <value>`
 - Required parameters will error if missing
 - Use `ocli commands` to list all available commands
+- Use `--profile <name>` (or `-p <name>`) to switch profile for a single call without running `ocli use`
 ````

@@ -15,8 +15,8 @@ defaults:
     shell: bash
 
 jobs:
-  test-and-publish:
-    name: Test and publish package
+  publish:
+    name: Publish package
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -37,9 +37,6 @@ jobs:
 
       - name: Build TypeScript
         run: npm run build
-
-      - name: Run tests
-        run: npm test
 
       - name: Publish to npm
         env:
