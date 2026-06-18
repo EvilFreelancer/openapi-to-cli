@@ -1,0 +1,51 @@
+---
+paths:
+  - "tests/**/*.ts"
+---
+
+# Test conventions (Jest)
+
+Applies when editing or adding files under `tests/`.
+
+## Layout
+
+- All tests live in `tests/` alongside the matching `src/` module.
+- Test files: `tests/<module>.test.ts` (one per `src/<module>.ts`).
+- Shared inputs in `tests/fixtures/` (OpenAPI/Swagger documents, sample profiles). Recorded outputs in `tests/results/`.
+- `github-api.test.ts` and `box-api-yaml.test.ts` are large real-spec regression tests - do not hand-edit their fixtures.
+
+## Structure
+
+- Group with `describe(<moduleName>, ...)`; one nested `describe` per public method or scenario.
+- Test names: `it("does X when Y", ...)` - describe behavior, not implementation.
+- Arrange / Act / Assert order inside each `it`. Blank lines between the three sections are encouraged.
+
+## Isolation
+
+- Each `it` is independent. Use `beforeEach`/`afterEach` for setup and teardown, not module-level mutable state.
+- Mock `fs` and `axios` (`HttpClient`) through the constructor options the modules expose. Do **not** monkey-patch the real `fs`/`axios` modules in tests.
+- For `.ocli/` fixtures, use `fs.mkdtempSync(os.tmpdir() + "/...")` and clean up in `afterEach`.
+
+## Running
+
+```bash
+npm test                                # full Jest suite
+npx jest tests/<file>.test.ts           # one file
+npx jest tests/<file>.test.ts -t "X"    # one test by name
+```
+
+## What to assert
+
+- Public behavior visible at the module boundary - return values, written files, requests issued via the mocked `HttpClient`, captured `stdout`.
+- For BM25 / `command-search` - assert ranking order and matched commands, not internal scores.
+- For `openapi-to-commands` - assert the resulting `CliCommand[]` structure (names, options, body schema), not intermediate spec normalization.
+
+## What not to assert
+
+- Internal helper signatures, private state, exact log strings - those are implementation details.
+- Floating-point BM25 scores beyond ranking order.
+
+## Fixtures
+
+- Add new spec fixtures only when an existing one cannot reproduce the case. Keep them minimal: one path, one operation, only the fields needed for the test.
+- For tests covering spec features (OAS 3 `requestBody`, Swagger 2 `formData`, multi-file `$ref`, header/cookie params), name the fixture after the feature, e.g. `tests/fixtures/swagger2-formdata.yaml`.
