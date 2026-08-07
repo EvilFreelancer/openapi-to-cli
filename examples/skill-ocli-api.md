@@ -77,6 +77,7 @@ ocli commands -p github --query "list pull requests"
 - All responses are JSON — pipe through `jq` for filtering
 - Path parameters (like `{id}`) are passed as `--id <value>`
 - Required parameters will error if missing
+- Undeclared flags are rejected with `Unknown option: --x`, so copy names exactly from `--help` (including a leading `$`)
 - Use `ocli commands` to list all available commands
 - Use `--profile <name>` (or `-p <name>`) to switch profile for a single call without running `ocli use`
 ````

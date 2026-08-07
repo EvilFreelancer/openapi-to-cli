@@ -82,5 +82,6 @@ ocli repos_get --profile github --owner octocat --repo Hello-World
 
 - **Command not found**: re-search with different keywords or use `--regex`.
 - **Missing required parameter**: run `--help` and add the missing flag.
+- **Unknown option**: the flag is not defined by the command; copy the exact name from `--help`, including a leading `$` when the spec uses one (`--$expand`).
 - **401/403**: check that the profile has a valid token (`ocli profiles show <name>`).
 - **Spec not loaded**: run `ocli profiles add` again with `--openapi-spec` to refresh cache.
