@@ -63,6 +63,21 @@ ocli commands -p other --query "send message"
 
 `--profile` (short `-p`) overrides the profile selected by `ocli use` for this invocation only. It works for both dynamic API commands and `ocli commands`. Place it anywhere after the command name. When omitted, the profile set via `ocli use` is used (falling back to `default`).
 
+### Strict flag validation
+
+`ocli` refuses to run a command with a flag the spec does not define, instead of dropping it from the request:
+
+```bash
+$ ocli people_vanId_get --vanId 12345678 --expand addresses
+Unknown option: --expand (did you mean --$expand?). Run 'ocli people_vanId_get --help' to see available options.
+$ echo $?
+1
+```
+
+The same applies to built-in commands: `ocli commands --qeury pull` exits with `Unknown argument: qeury`.
+
+One exception is kept on purpose. When an operation accepts a body (`POST`, `PUT`, `PATCH`, `DELETE`) and the spec describes no request body, undeclared flags are still forwarded as JSON body fields — that is the only way to call endpoints whose payload is not documented. As soon as the spec declares body properties or `formData` parameters, those names become the full list of accepted flags.
+
 Or use `npx` without global install:
 
 ```bash

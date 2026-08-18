@@ -9,6 +9,7 @@ import { ProfileStore, Profile } from "./profile-store";
 import { OpenapiLoader } from "./openapi-loader";
 import { OpenapiToCommands, CliCommand, CliCommandOption } from "./openapi-to-commands";
 import { CommandSearch } from "./command-search";
+import { findUnknownFlags, formatUnknownFlagsError } from "./command-args";
 import { VERSION } from "./version";
 
 export interface HttpClient {
@@ -211,6 +212,11 @@ async function runApiCommand(
   }
 
   const { flags } = parseArgs(commandArgs);
+
+  const unknownFlags = findUnknownFlags(command, Object.keys(flags));
+  if (unknownFlags.length > 0) {
+    throw new Error(formatUnknownFlagsError(command.name, unknownFlags));
+  }
 
   const missingRequired = command.options
     .filter((opt) => opt.required)
@@ -632,6 +638,9 @@ export async function run(argv: string[], options?: RunOptions): Promise<void> {
   await yargs(argv)
     .scriptName("ocli")
     .version(VERSION)
+    // yargs localizes its built-in messages from the environment locale; the CLI surface is English-only
+    .locale("en")
+    .strict()
     .exitProcess(false)
     .fail((msg, err) => {
       if (err) {

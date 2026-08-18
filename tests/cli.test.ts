@@ -1683,4 +1683,170 @@ describe("cli", () => {
       expect(out).toContain("-p");
     });
   });
+
+  describe("unknown flags", () => {
+    function createExpandApiDeps() {
+      const localDir = `${cwd}/.ocli`;
+      const profilesPath = `${localDir}/profiles.ini`;
+      const cachePath = `${localDir}/specs/expand-api.json`;
+
+      const spec = {
+        openapi: "3.0.0",
+        paths: {
+          "/widgets/{id}": {
+            get: {
+              summary: "Get a widget by id",
+              parameters: [
+                { name: "id", in: "path", required: true, schema: { type: "string" } },
+                { name: "$expand", in: "query", required: false, schema: { type: "string" } },
+              ],
+            },
+          },
+          "/widgets": {
+            post: {
+              summary: "Create a widget",
+              requestBody: {
+                required: true,
+                content: {
+                  "application/json": {
+                    schema: {
+                      type: "object",
+                      required: ["title"],
+                      properties: {
+                        title: { type: "string" },
+                        draft: { type: "boolean" },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      };
+
+      const iniContent = [
+        "[expand-api]",
+        "api_base_url = https://api.example.com",
+        "api_basic_auth = ",
+        "api_bearer_token = ",
+        "openapi_spec_source = /spec.json",
+        `openapi_spec_cache = ${cachePath}`,
+        "include_endpoints = ",
+        "exclude_endpoints = ",
+        "",
+      ].join("\n");
+
+      const capturedConfigs: unknown[] = [];
+      const fakeHttpClient: HttpClient = {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        request: async (config: any) => {
+          capturedConfigs.push(config);
+          return { status: 200, statusText: "OK", headers: {}, config, data: { ok: true } };
+        },
+      };
+
+      const { profileStore, openapiLoader } = createCliDeps(cwd, homeDir, {
+        [profilesPath]: iniContent,
+        [cachePath]: JSON.stringify(spec),
+        [`${localDir}/current`]: "expand-api",
+      });
+
+      return { profileStore, openapiLoader, fakeHttpClient, capturedConfigs };
+    }
+
+    it("rejects an undeclared flag instead of silently dropping it", async () => {
+      const { profileStore, openapiLoader, fakeHttpClient, capturedConfigs } = createExpandApiDeps();
+
+      await expect(
+        run(["widgets_id", "--id", "widget-1", "--bogus", "value"], {
+          cwd,
+          profileStore,
+          openapiLoader,
+          httpClient: fakeHttpClient,
+          stdout: () => {},
+        })
+      ).rejects.toThrow("Unknown option: --bogus");
+
+      expect(capturedConfigs).toHaveLength(0);
+    });
+
+    it("suggests the declared option when the $ prefix is missing", async () => {
+      const { profileStore, openapiLoader, fakeHttpClient, capturedConfigs } = createExpandApiDeps();
+
+      await expect(
+        run(["widgets_id", "--id", "widget-1", "--expand", "parts"], {
+          cwd,
+          profileStore,
+          openapiLoader,
+          httpClient: fakeHttpClient,
+          stdout: () => {},
+        })
+      ).rejects.toThrow("did you mean --$expand?");
+
+      expect(capturedConfigs).toHaveLength(0);
+    });
+
+    it("still accepts the correctly spelled $-prefixed option", async () => {
+      const { profileStore, openapiLoader, fakeHttpClient, capturedConfigs } = createExpandApiDeps();
+
+      await run(["widgets_id", "--id", "widget-1", "--$expand", "parts"], {
+        cwd,
+        profileStore,
+        openapiLoader,
+        httpClient: fakeHttpClient,
+        stdout: () => {},
+      });
+
+      const config = capturedConfigs[0] as { url: string };
+      expect(config.url).toBe("https://api.example.com/widgets/widget-1?%24expand=parts");
+    });
+
+    it("rejects an undeclared flag when the spec describes the request body", async () => {
+      const { profileStore, openapiLoader, fakeHttpClient, capturedConfigs } = createExpandApiDeps();
+
+      await expect(
+        run(["widgets", "--title", "Widget", "--drafts", "true"], {
+          cwd,
+          profileStore,
+          openapiLoader,
+          httpClient: fakeHttpClient,
+          stdout: () => {},
+        })
+      ).rejects.toThrow("Unknown option: --drafts (did you mean --draft?)");
+
+      expect(capturedConfigs).toHaveLength(0);
+    });
+
+    it("keeps forwarding undeclared flags as body fields when the spec describes no request body", async () => {
+      const { profileStore, openapiLoader, fakeHttpClient, capturedConfigs } = createPostApiDeps();
+
+      await run(
+        [
+          "org_slug_repo_slug_ci_workflows_workflow_name_trigger",
+          "--org_slug", "myorg",
+          "--repo_slug", "myrepo",
+          "--workflow_name", "deploy",
+          "--revision", "main",
+        ],
+        { cwd, profileStore, openapiLoader, httpClient: fakeHttpClient, stdout: () => {} }
+      );
+
+      const config = capturedConfigs[0] as { data: Record<string, unknown> };
+      expect(config.data.revision).toBe("main");
+    });
+
+    it("rejects an unknown flag on the commands subcommand", async () => {
+      const { profileStore, openapiLoader } = createExpandApiDeps();
+
+      await expect(
+        run(["commands", "--qeury", "widget"], {
+          cwd,
+          profileStore,
+          openapiLoader,
+          stdout: () => {},
+        })
+      ).rejects.toThrow("Unknown argument: qeury");
+    });
+  });
 });
