@@ -2,6 +2,7 @@ import { ConfigLocator } from "../src/config";
 import { ProfileStore } from "../src/profile-store";
 import { OpenapiLoader } from "../src/openapi-loader";
 import { run, HttpClient } from "../src/cli";
+import { AxiosError } from "axios";
 import { VERSION } from "../src/version";
 
 interface MemoryFsEntry {
@@ -748,6 +749,34 @@ describe("cli", () => {
         { cwd, profileStore, openapiLoader, httpClient: fakeHttpClient, stdout: () => {} }
       )
     ).rejects.toThrow("Invalid JSON body value");
+  });
+
+  it("includes the response body in the error message on failed requests", async () => {
+    const { profileStore, openapiLoader } = createPostApiDeps();
+
+    const failingHttpClient: HttpClient = {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      request: async (config: any) => {
+        const response = { status: 400, statusText: "Bad Request", headers: {}, config, data: { message: "invalid input" } };
+        throw new AxiosError("Request failed with status code 400", "ERR_BAD_REQUEST", config, {}, response);
+      },
+    };
+
+    await expect(
+      run(
+        [
+          "org_slug_repo_slug_ci_workflows_workflow_name_trigger",
+          "--org_slug", "myorg",
+          "--repo_slug", "myrepo",
+          "--workflow_name", "deploy",
+          "--input", '{"values":[{"name":"FOO","value":"bar"}]}',
+        ],
+        { cwd, profileStore, openapiLoader, httpClient: failingHttpClient, stdout: () => {} }
+      )
+    ).rejects.toThrow(`Request failed with status code 400
+{
+  "message": "invalid input"
+}`);
   });
 
   it("builds JSON request body from declared OAS3 requestBody properties", async () => {
