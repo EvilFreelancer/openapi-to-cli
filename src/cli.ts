@@ -2,7 +2,7 @@
 
 import path from "path";
 import yargs from "yargs";
-import axios, { AxiosRequestConfig, AxiosResponse } from "axios";
+import axios, { AxiosError, AxiosRequestConfig, AxiosResponse } from "axios";
 
 import { ConfigLocator } from "./config";
 import { ProfileStore, Profile } from "./profile-store";
@@ -244,8 +244,19 @@ async function runApiCommand(
     ...(hasBody ? { data: payload.data } : {}),
   };
 
-  const response = await httpClient.request(requestConfig);
-  stdout(`${JSON.stringify(response.data, null, 2)}\n`);
+  try {
+    const response = await httpClient.request(requestConfig);
+    stdout(`${JSON.stringify(response.data, null, 2)}\n`);
+  } catch (err) {
+    if (err instanceof AxiosError && err.response?.data !== undefined) {
+      const body =
+        typeof err.response.data === "string"
+          ? err.response.data
+          : JSON.stringify(err.response.data, null, 2);
+      throw new Error(`${err.message}\n${body}`);
+    }
+    throw err;
+  }
 }
 
 function parseBodyFlagValue(value: string): unknown {
