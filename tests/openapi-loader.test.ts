@@ -269,4 +269,43 @@ describe("OpenapiLoader", () => {
     expect(loaded.paths["/jobs"].get.parameters[0].name).toBe("job_id");
     expect(loaded.paths["/jobs"].get.parameters[0].in).toBe("query");
   });
+
+  it("passes headers to axios for the spec and remote ref documents", async () => {
+    mockedAxios.get.mockImplementation(async (source: string) => {
+      if (source === "https://example.com/root.yaml") {
+        return {
+          data: `openapi: "3.0.0"\npaths:\n  /jobs:\n    $ref: "./paths/jobs.yaml#/jobsPath"\n`,
+        };
+      }
+
+      if (source === "https://example.com/paths/jobs.yaml") {
+        return {
+          data: `jobsPath:\n  get:\n    summary: Get job\n`,
+        };
+      }
+
+      throw new Error(`Unexpected URL: ${source}`);
+    });
+
+    const profile: Profile = {
+      ...baseProfile,
+      openapiSpecSource: "https://example.com/root.yaml",
+    };
+
+    const fs = new MemoryFs();
+    const loader = new OpenapiLoader({ fs });
+
+    await loader.loadSpec(profile, {
+      refresh: true,
+      headers: { Authorization: "Bearer token123", "x-api-key": "key123" },
+    });
+
+    expect(mockedAxios.get).toHaveBeenCalledTimes(2);
+    for (const call of mockedAxios.get.mock.calls) {
+      expect(call[1]).toEqual({
+        responseType: "text",
+        headers: { Authorization: "Bearer token123", "x-api-key": "key123" },
+      });
+    }
+  });
 });
