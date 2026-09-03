@@ -2,8 +2,14 @@ import { ConfigLocator } from "../src/config";
 import { ProfileStore } from "../src/profile-store";
 import { OpenapiLoader } from "../src/openapi-loader";
 import { run, HttpClient } from "../src/cli";
+import axios from "axios";
 import { AxiosError } from "axios";
 import { VERSION } from "../src/version";
+
+jest.mock("axios", () => ({
+  ...jest.requireActual("axios"),
+  get: jest.fn(),
+}));
 
 interface MemoryFsEntry {
   type: "file" | "dir";
@@ -162,6 +168,49 @@ describe("cli", () => {
     expect(profile?.name).toBe("myapi");
     expect(profile?.apiBaseUrl).toBe("http://127.0.0.1:3000");
     expect(profileStore.getCurrentProfileName(cwd)).toBe("myapi");
+  });
+
+  it("profiles add sends profile auth headers when fetching a protected HTTP spec", async () => {
+    const mockedAxios = axios as jest.Mocked<typeof axios>;
+    const spec = { openapi: "3.0.0", paths: {} };
+
+    mockedAxios.get.mockImplementation(async (_url: string, config?: any) => {
+      if (config?.headers?.Authorization !== "Bearer secret123" || config?.headers?.["x-api-key"] !== "key123") {
+        throw new AxiosError("Request failed with status code 401", "401");
+      }
+      return { data: spec };
+    });
+
+    const localDir = `${cwd}/.ocli`;
+    const profilesPath = `${localDir}/profiles.ini`;
+    const fs = new MemoryFs();
+    const locator = new ConfigLocator({ fs, homeDir });
+    const profileStore = new ProfileStore({ fs, locator });
+    const openapiLoader = new OpenapiLoader({ fs });
+
+    await run(
+      [
+        "profiles",
+        "add",
+        "protected",
+        "--api-base-url",
+        "http://127.0.0.1:3000",
+        "--openapi-spec",
+        "http://127.0.0.1:3000/openapi.json",
+        "--api-bearer-token",
+        "secret123",
+        "--custom-headers",
+        '{"x-api-key":"key123"}',
+      ],
+      { cwd, profileStore, openapiLoader }
+    );
+
+    expect(mockedAxios.get).toHaveBeenCalledTimes(1);
+    expect(fs.existsSync(profilesPath)).toBe(true);
+    const profile = profileStore.getCurrentProfile(cwd);
+    expect(profile?.name).toBe("protected");
+    expect(profile?.apiBearerToken).toBe("secret123");
+    expect(profile?.customHeaders).toEqual({ "x-api-key": "key123" });
   });
 
   it("profiles list prints profile names", async () => {
