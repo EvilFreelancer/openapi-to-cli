@@ -114,7 +114,7 @@ async function runApiCommand(
   const { profileName: overrideName, remaining: commandArgs } = extractProfileFlag(args);
   const profile = resolveProfile(profileStore, cwd, overrideName);
 
-  const spec = await openapiLoader.loadSpec(profile);
+  const spec = await openapiLoader.loadSpec(profile, { headers: buildProfileAuthHeaders(profile) });
   const commands = openapiToCommands.buildCommands(spec, profile);
   const command = commands.find((cmd) => cmd.name === toolName);
 
@@ -345,7 +345,7 @@ function buildRequestUrl(profile: Profile, command: CliCommand, flags: Record<st
   return url;
 }
 
-function buildHeaders(profile: Profile, command: CliCommand, flags: Record<string, string>): Record<string, string> {
+function buildProfileAuthHeaders(profile: Profile): Record<string, string> {
   const headers: Record<string, string> = {};
 
   if (profile.customHeaders) {
@@ -358,6 +358,12 @@ function buildHeaders(profile: Profile, command: CliCommand, flags: Record<strin
   } else if (profile.apiBearerToken) {
     headers.Authorization = `Bearer ${profile.apiBearerToken}`;
   }
+
+  return headers;
+}
+
+function buildHeaders(profile: Profile, command: CliCommand, flags: Record<string, string>): Record<string, string> {
+  const headers = buildProfileAuthHeaders(profile);
 
   const cookiePairs: string[] = [];
   command.options
@@ -619,7 +625,7 @@ export async function run(argv: string[], options?: RunOptions): Promise<void> {
       customHeaders,
     };
 
-    await openapiLoader.loadSpec(profile, { refresh: true });
+    await openapiLoader.loadSpec(profile, { refresh: true, headers: buildProfileAuthHeaders(profile) });
     profileStore.saveProfile(cwd, profile, { makeCurrent: true });
   };
 
@@ -753,7 +759,7 @@ export async function run(argv: string[], options?: RunOptions): Promise<void> {
       async (args) => {
         const overrideName = args.profile as string | undefined;
         const profile = resolveProfile(profileStore, cwd, overrideName);
-        const spec = await openapiLoader.loadSpec(profile);
+        const spec = await openapiLoader.loadSpec(profile, { headers: buildProfileAuthHeaders(profile) });
         const commands = openapiToCommands.buildCommands(spec, profile);
         if (commands.length === 0) {
           stdout(`No commands available for profile ${profile.name}\n`);

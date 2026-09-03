@@ -27,6 +27,7 @@ export class OpenapiLoader {
     profile: Profile,
     options?: {
       refresh?: boolean;
+      headers?: Record<string, string>;
     }
   ): Promise<unknown> {
     const cachePath = profile.openapiSpecCache;
@@ -36,7 +37,7 @@ export class OpenapiLoader {
       return JSON.parse(cached);
     }
 
-    const spec = await this.loadAndResolveSpec(profile.openapiSpecSource);
+    const spec = await this.loadAndResolveSpec(profile.openapiSpecSource, options?.headers);
     this.ensureCacheDir(cachePath);
 
     const serialized = JSON.stringify(spec, null, 2);
@@ -45,20 +46,21 @@ export class OpenapiLoader {
     return spec;
   }
 
-  private async loadAndResolveSpec(source: string): Promise<unknown> {
+  private async loadAndResolveSpec(source: string, headers?: Record<string, string>): Promise<unknown> {
     const rawDocCache = new Map<string, unknown>();
-    const root = await this.loadDocument(source, rawDocCache);
+    const root = await this.loadDocument(source, rawDocCache, headers);
     return this.resolveRefs(root, {
       currentSource: source,
       currentDocument: root,
       rawDocCache,
       resolvingRefs: new Set<string>(),
+      headers,
     });
   }
 
-  private async loadFromSource(source: string): Promise<unknown> {
+  private async loadFromSource(source: string, headers?: Record<string, string>): Promise<unknown> {
     if (source.startsWith("http://") || source.startsWith("https://")) {
-      const response = await axios.get(source, { responseType: "text" });
+      const response = await axios.get(source, { responseType: "text", headers });
       return this.parseSpec(response.data, source);
     }
 
@@ -66,12 +68,16 @@ export class OpenapiLoader {
     return this.parseSpec(raw, source);
   }
 
-  private async loadDocument(source: string, rawDocCache: Map<string, unknown>): Promise<unknown> {
+  private async loadDocument(
+    source: string,
+    rawDocCache: Map<string, unknown>,
+    headers?: Record<string, string>
+  ): Promise<unknown> {
     if (rawDocCache.has(source)) {
       return rawDocCache.get(source);
     }
 
-    const loaded = await this.loadFromSource(source);
+    const loaded = await this.loadFromSource(source, headers);
     rawDocCache.set(source, loaded);
     return loaded;
   }
@@ -93,6 +99,7 @@ export class OpenapiLoader {
       currentDocument: unknown;
       rawDocCache: Map<string, unknown>;
       resolvingRefs: Set<string>;
+      headers?: Record<string, string>;
     }
   ): Promise<unknown> {
     if (Array.isArray(value)) {
@@ -139,6 +146,7 @@ export class OpenapiLoader {
       currentDocument: unknown;
       rawDocCache: Map<string, unknown>;
       resolvingRefs: Set<string>;
+      headers?: Record<string, string>;
     }
   ): Promise<unknown> {
     const { source, pointer } = this.splitRef(ref, context.currentSource);
@@ -152,7 +160,7 @@ export class OpenapiLoader {
 
     const targetDocument = source === context.currentSource
       ? context.currentDocument
-      : await this.loadDocument(source, context.rawDocCache);
+      : await this.loadDocument(source, context.rawDocCache, context.headers);
 
     const targetValue = this.resolvePointer(targetDocument, pointer);
     const resolvedValue = await this.resolveRefs(targetValue, {
