@@ -20,7 +20,7 @@ When the user asks for a new feature (words like "feature", "add", "implement", 
 5. **Confirm green**: re-run the same test; it must pass.
 6. **Full suite**: `npm test`. All tests must be green. Fix regressions before moving on.
 7. **Build check**: `npm run build` to confirm `tsc` is clean (no type errors).
-8. **Docs**: update `README.md` whenever any of the following change: CLI flags, command names, profile fields, `.ocli/` layout, BM25 search behavior, supported OpenAPI/Swagger features, or the benchmark numbers. If you changed observable CLI output (`--help`, error messages, exit codes), update the relevant section of the README. The `examples/skill-ocli-api.md` and `skills/ocli-api/SKILL.md` must stay aligned with the documented agent workflow.
+8. **Docs**: update `README.md` whenever any of the following change: CLI flags, command names, profile fields, `.ocli/` layout, BM25 search behavior, supported OpenAPI/Swagger features, authentication and header handling (which requests carry profile credentials and custom headers, and to which hosts), spec loading and caching (accepted sources, `$ref` resolution, when the cache is refreshed), or the benchmark numbers. A change counts even when it adds no flag: if a user can observe the difference (a spec behind auth now loads, credentials reach a host they did not reach before), document it. If you changed observable CLI output (`--help`, error messages, exit codes), update the relevant section of the README. The `examples/skill-ocli-api.md` and `skills/ocli-api/SKILL.md` must stay aligned with the documented agent workflow.
 9. **Report**: brief summary of files touched, tests added, suite result.
 
 ## Bug fixes (TDD)
@@ -44,9 +44,9 @@ When the user reports a bug (words like "bug", "fix", "ошибка", "баг", 
 - `README.md` reflects any user-visible change.
 - Report what changed, which tests were added, and the suite result.
 
-## Rules sync (Cursor <-> Claude)
+## Rules sync (Cursor <-> Claude <-> Codex)
 
-`.claude/rules/*.md` and `.cursor/rules/*.mdc` cover the same topics and must stay aligned. **Any change to a rule in one location must be mirrored to the other in the same change**, no exceptions.
+`.claude/rules/*.md` and `.cursor/rules/*.mdc` cover the same topics and must stay aligned. **Any change to a rule in one location must be mirrored to the other in the same change**, no exceptions. Codex reads the Cursor side through the hook bridge in `.codex/` (`hooks.json`, `hooks/attach_rules.py`), so there is no third copy of the rule bodies; what must be kept in step for Codex is the index `.codex/rules.md` and the top-level brief `AGENTS.md`, to which `CLAUDE.md` is a symlink.
 
 Mapping:
 
@@ -60,11 +60,18 @@ Mapping:
 
 When propagating, translate the frontmatter:
 
-- Claude `paths: ["src/**/*.ts"]` -> Cursor `globs: "src/**/*.ts"` + `alwaysApply: true` (or `false` for optional topics like `implementation-order`).
+- Claude `paths: ["src/**/*.ts"]` -> Cursor `globs: src/**/*.ts` + `alwaysApply: true` (or `false` for optional topics like `implementation-order`). Keep `globs` unquoted: the Codex bridge parser reads the value literally, and a quoted glob never matches.
 - Claude rule without frontmatter (loaded every session, e.g. `workflow.md`) -> Cursor `alwaysApply: true` with no `globs`.
 - Replace cross-rule links: Claude `[architecture.md](architecture.md)` -> Cursor `@architecture.mdc`.
 
 Body content stays identical. If the change is Cursor-only or Claude-only (very rare - e.g. tool-specific quirk), state that explicitly in the file as "Tool-specific:" and skip mirroring for that section only.
+
+Checklist for every rule change:
+
+1. Edit the Claude file and its Cursor mirror in the same commit.
+2. If a rule file was added, renamed, or removed, refresh the table in `.codex/rules.md` and the rule list in `AGENTS.md`.
+3. If `AGENTS.md` changed, confirm `CLAUDE.md` still resolves to it (`ls -la CLAUDE.md`).
+4. A rule reaches Codex only if its Cursor frontmatter carries `globs` or `alwaysApply: true`. The hook script and `hooks.json` are never edited per project; after any edit to them, Codex users must re-run `/hooks` to trust the new hash.
 
 ## Relationship to other rules
 

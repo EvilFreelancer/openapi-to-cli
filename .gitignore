@@ -12,3 +12,4 @@ tests/**/*.d.ts
 .ocli/
 tests/fixtures/*.json
 tests/fixtures/*.yaml
+__pycache__/
