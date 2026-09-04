@@ -2,14 +2,8 @@ import { ConfigLocator } from "../src/config";
 import { ProfileStore } from "../src/profile-store";
 import { OpenapiLoader } from "../src/openapi-loader";
 import { run, HttpClient } from "../src/cli";
-import axios from "axios";
 import { AxiosError } from "axios";
 import { VERSION } from "../src/version";
-
-jest.mock("axios", () => ({
-  ...jest.requireActual("axios"),
-  get: jest.fn(),
-}));
 
 interface MemoryFsEntry {
   type: "file" | "dir";
@@ -171,22 +165,22 @@ describe("cli", () => {
   });
 
   it("profiles add sends profile auth headers when fetching a protected HTTP spec", async () => {
-    const mockedAxios = axios as jest.Mocked<typeof axios>;
     const spec = { openapi: "3.0.0", paths: {} };
-
-    mockedAxios.get.mockImplementation(async (_url: string, config?: any) => {
-      if (config?.headers?.Authorization !== "Bearer secret123" || config?.headers?.["x-api-key"] !== "key123") {
-        throw new AxiosError("Request failed with status code 401", "401");
-      }
-      return { data: spec };
-    });
+    const specHttpClient = {
+      get: jest.fn(async (_url: string, options?: { headers?: Record<string, string> }) => {
+        if (options?.headers?.Authorization !== "Bearer secret123" || options?.headers?.["x-api-key"] !== "key123") {
+          throw Object.assign(new Error("Request failed with status code 401"), { response: { status: 401 } });
+        }
+        return { data: spec };
+      }),
+    };
 
     const localDir = `${cwd}/.ocli`;
     const profilesPath = `${localDir}/profiles.ini`;
     const fs = new MemoryFs();
     const locator = new ConfigLocator({ fs, homeDir });
     const profileStore = new ProfileStore({ fs, locator });
-    const openapiLoader = new OpenapiLoader({ fs });
+    const openapiLoader = new OpenapiLoader({ fs, httpClient: specHttpClient });
 
     await run(
       [
@@ -205,12 +199,49 @@ describe("cli", () => {
       { cwd, profileStore, openapiLoader }
     );
 
-    expect(mockedAxios.get).toHaveBeenCalledTimes(1);
+    expect(specHttpClient.get).toHaveBeenCalledTimes(1);
+    expect(specHttpClient.get).toHaveBeenCalledWith("http://127.0.0.1:3000/openapi.json", {
+      headers: { Authorization: "Bearer secret123", "x-api-key": "key123" },
+    });
     expect(fs.existsSync(profilesPath)).toBe(true);
     const profile = profileStore.getCurrentProfile(cwd);
     expect(profile?.name).toBe("protected");
     expect(profile?.apiBearerToken).toBe("secret123");
     expect(profile?.customHeaders).toEqual({ "x-api-key": "key123" });
+  });
+
+  it("profiles add reports a 401 from the spec URL and points at the auth flags", async () => {
+    const specHttpClient = {
+      get: jest.fn(async () => {
+        throw Object.assign(new Error("Request failed with status code 401"), { response: { status: 401 } });
+      }),
+    };
+
+    const localDir = `${cwd}/.ocli`;
+    const profilesPath = `${localDir}/profiles.ini`;
+    const fs = new MemoryFs();
+    const locator = new ConfigLocator({ fs, homeDir });
+    const profileStore = new ProfileStore({ fs, locator });
+    const openapiLoader = new OpenapiLoader({ fs, httpClient: specHttpClient });
+
+    const failure = await run(
+      [
+        "profiles",
+        "add",
+        "protected",
+        "--api-base-url",
+        "http://127.0.0.1:3000",
+        "--openapi-spec",
+        "http://127.0.0.1:3000/openapi.json",
+      ],
+      { cwd, profileStore, openapiLoader }
+    ).catch((err: Error) => err);
+
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toContain("http://127.0.0.1:3000/openapi.json");
+    expect((failure as Error).message).toContain("401");
+    expect((failure as Error).message).toContain("--api-bearer-token");
+    expect(fs.existsSync(profilesPath)).toBe(false);
   });
 
   it("profiles list prints profile names", async () => {

@@ -1,8 +1,5 @@
-import axios from "axios";
 import { Profile } from "../src/profile-store";
-import { OpenapiLoader } from "../src/openapi-loader";
-
-jest.mock("axios");
+import { OpenapiLoader, SpecFetchError, SpecHttpClient } from "../src/openapi-loader";
 
 interface MemoryFsEntry {
   type: "file" | "dir";
@@ -72,9 +69,34 @@ class MemoryFs {
   }
 }
 
-describe("OpenapiLoader", () => {
-  const mockedAxios = axios as jest.Mocked<typeof axios>;
+type SpecHttpGet = jest.MockedFunction<SpecHttpClient["get"]>;
 
+interface FakeSpecHttpClient extends SpecHttpClient {
+  get: SpecHttpGet;
+}
+
+function createHttpClient(): FakeSpecHttpClient {
+  return { get: jest.fn() as SpecHttpGet };
+}
+
+function serveDocuments(documents: Record<string, string | object>): SpecHttpClient["get"] {
+  return async (url: string) => {
+    if (url in documents) {
+      return { data: documents[url] };
+    }
+    throw new Error(`Unexpected URL: ${url}`);
+  };
+}
+
+function headersSentTo(httpClient: FakeSpecHttpClient, url: string): Record<string, string> | undefined {
+  const call = httpClient.get.mock.calls.find(([calledUrl]) => calledUrl === url);
+  if (!call) {
+    throw new Error(`No request was made to ${url}`);
+  }
+  return call[1]?.headers;
+}
+
+describe("OpenapiLoader", () => {
   const baseProfile: Profile = {
     name: "myapi",
     apiBaseUrl: "http://127.0.0.1:3000",
@@ -84,20 +106,24 @@ describe("OpenapiLoader", () => {
     openapiSpecCache: "/home/user/.ocli/specs/myapi.json",
     includeEndpoints: [],
     excludeEndpoints: [],
-  commandPrefix: "",
-  customHeaders: {},
+    commandPrefix: "",
+    customHeaders: {},
   };
 
+  const profileHeaders = { Authorization: "Bearer token123", "x-api-key": "key123" };
+
+  let httpClient: FakeSpecHttpClient;
+
   beforeEach(() => {
-    mockedAxios.get.mockReset();
+    httpClient = createHttpClient();
   });
 
   it("downloads spec from HTTP URL and caches it when cache is missing", async () => {
     const spec = { openapi: "3.0.0", info: { title: "API", version: "1.0.0" } };
-    mockedAxios.get.mockResolvedValueOnce({ data: spec });
+    httpClient.get.mockResolvedValueOnce({ data: spec });
 
     const fs = new MemoryFs();
-    const loader = new OpenapiLoader({ fs });
+    const loader = new OpenapiLoader({ fs, httpClient });
 
     const profile: Profile = {
       ...baseProfile,
@@ -107,6 +133,8 @@ describe("OpenapiLoader", () => {
     const loaded = await loader.loadSpec(profile);
 
     expect(loaded).toEqual(spec);
+    expect(httpClient.get).toHaveBeenCalledTimes(1);
+    expect(httpClient.get.mock.calls[0][0]).toBe(profile.openapiSpecSource);
     expect(fs.existsSync(profile.openapiSpecCache)).toBe(true);
 
     const cachedRaw = fs.readFileSync(profile.openapiSpecCache, "utf-8");
@@ -125,13 +153,12 @@ describe("OpenapiLoader", () => {
       [profile.openapiSpecCache]: JSON.stringify(cachedSpec),
     });
 
-    const loader = new OpenapiLoader({ fs });
+    const loader = new OpenapiLoader({ fs, httpClient });
 
     const loaded = await loader.loadSpec(profile);
 
     expect(loaded).toEqual(cachedSpec);
-    // No HTTP call is needed when cache exists.
-    mockedAxios.get.mockClear();
+    expect(httpClient.get).not.toHaveBeenCalled();
   });
 
   it("loads spec from local file path and writes cache", async () => {
@@ -146,11 +173,12 @@ describe("OpenapiLoader", () => {
       [profile.openapiSpecSource]: JSON.stringify(sourceSpec),
     });
 
-    const loader = new OpenapiLoader({ fs });
+    const loader = new OpenapiLoader({ fs, httpClient });
 
     const loaded = await loader.loadSpec(profile, { refresh: true });
 
     expect(loaded).toEqual(sourceSpec);
+    expect(httpClient.get).not.toHaveBeenCalled();
     expect(fs.existsSync(profile.openapiSpecCache)).toBe(true);
 
     const cachedRaw = fs.readFileSync(profile.openapiSpecCache, "utf-8");
@@ -169,17 +197,17 @@ describe("OpenapiLoader", () => {
       [profile.openapiSpecSource]: yamlContent,
     });
 
-    const loader = new OpenapiLoader({ fs });
-    const loaded = await loader.loadSpec(profile, { refresh: true }) as Record<string, unknown>;
+    const loader = new OpenapiLoader({ fs, httpClient });
+    const loaded = await loader.loadSpec(profile, { refresh: true }) as Record<string, any>;
 
-    expect((loaded as any).openapi).toBe("3.0.0");
-    expect((loaded as any).info.title).toBe("YAML API");
-    expect((loaded as any).paths["/test"].get.summary).toBe("Test endpoint");
+    expect(loaded.openapi).toBe("3.0.0");
+    expect(loaded.info.title).toBe("YAML API");
+    expect(loaded.paths["/test"].get.summary).toBe("Test endpoint");
   });
 
   it("loads YAML spec from HTTP URL", async () => {
     const yamlContent = `openapi: "3.0.0"\ninfo:\n  title: Remote YAML\n  version: "2.0"\npaths: {}`;
-    mockedAxios.get.mockResolvedValueOnce({ data: yamlContent });
+    httpClient.get.mockResolvedValueOnce({ data: yamlContent });
 
     const profile: Profile = {
       ...baseProfile,
@@ -187,11 +215,11 @@ describe("OpenapiLoader", () => {
     };
 
     const fs = new MemoryFs();
-    const loader = new OpenapiLoader({ fs });
-    const loaded = await loader.loadSpec(profile, { refresh: true }) as Record<string, unknown>;
+    const loader = new OpenapiLoader({ fs, httpClient });
+    const loaded = await loader.loadSpec(profile, { refresh: true }) as Record<string, any>;
 
-    expect((loaded as any).openapi).toBe("3.0.0");
-    expect((loaded as any).info.title).toBe("Remote YAML");
+    expect(loaded.openapi).toBe("3.0.0");
+    expect(loaded.info.title).toBe("Remote YAML");
   });
 
   it("auto-detects YAML content even without .yaml extension", async () => {
@@ -206,10 +234,10 @@ describe("OpenapiLoader", () => {
       [profile.openapiSpecSource]: yamlContent,
     });
 
-    const loader = new OpenapiLoader({ fs });
-    const loaded = await loader.loadSpec(profile, { refresh: true }) as Record<string, unknown>;
+    const loader = new OpenapiLoader({ fs, httpClient });
+    const loaded = await loader.loadSpec(profile, { refresh: true }) as Record<string, any>;
 
-    expect((loaded as any).info.title).toBe("Auto Detect");
+    expect(loaded.info.title).toBe("Auto Detect");
   });
 
   it("resolves local external refs across multiple files", async () => {
@@ -228,34 +256,20 @@ describe("OpenapiLoader", () => {
       "/project/paths/components/request-bodies.yaml": requestBodies,
     });
 
-    const loader = new OpenapiLoader({ fs });
+    const loader = new OpenapiLoader({ fs, httpClient });
     const loaded = await loader.loadSpec(profile, { refresh: true }) as Record<string, any>;
 
     expect(loaded.paths["/jobs"].post.requestBody.content["application/json"].schema.properties.name.type).toBe("string");
   });
 
   it("resolves remote external refs across multiple documents", async () => {
-    mockedAxios.get.mockImplementation(async (source: string) => {
-      if (source === "https://example.com/root.yaml") {
-        return {
-          data: `openapi: "3.0.0"\npaths:\n  /jobs:\n    $ref: "./paths/jobs.yaml#/jobsPath"\n`,
-        };
-      }
-
-      if (source === "https://example.com/paths/jobs.yaml") {
-        return {
-          data: `jobsPath:\n  get:\n    parameters:\n      - $ref: "../components/params.yaml#/JobId"\n`,
-        };
-      }
-
-      if (source === "https://example.com/components/params.yaml") {
-        return {
-          data: `JobId:\n  name: job_id\n  in: query\n  required: true\n  schema:\n    type: string\n`,
-        };
-      }
-
-      throw new Error(`Unexpected URL: ${source}`);
-    });
+    httpClient.get.mockImplementation(
+      serveDocuments({
+        "https://example.com/root.yaml": `openapi: "3.0.0"\npaths:\n  /jobs:\n    $ref: "./paths/jobs.yaml#/jobsPath"\n`,
+        "https://example.com/paths/jobs.yaml": `jobsPath:\n  get:\n    parameters:\n      - $ref: "../components/params.yaml#/JobId"\n`,
+        "https://example.com/components/params.yaml": `JobId:\n  name: job_id\n  in: query\n  required: true\n  schema:\n    type: string\n`,
+      })
+    );
 
     const profile: Profile = {
       ...baseProfile,
@@ -263,49 +277,107 @@ describe("OpenapiLoader", () => {
     };
 
     const fs = new MemoryFs();
-    const loader = new OpenapiLoader({ fs });
+    const loader = new OpenapiLoader({ fs, httpClient });
     const loaded = await loader.loadSpec(profile, { refresh: true }) as Record<string, any>;
 
     expect(loaded.paths["/jobs"].get.parameters[0].name).toBe("job_id");
     expect(loaded.paths["/jobs"].get.parameters[0].in).toBe("query");
+    expect(headersSentTo(httpClient, "https://example.com/components/params.yaml")).toBeUndefined();
   });
 
-  it("passes headers to axios for the spec and remote ref documents", async () => {
-    mockedAxios.get.mockImplementation(async (source: string) => {
-      if (source === "https://example.com/root.yaml") {
-        return {
-          data: `openapi: "3.0.0"\npaths:\n  /jobs:\n    $ref: "./paths/jobs.yaml#/jobsPath"\n`,
-        };
-      }
+  describe("profile headers", () => {
+    it("sends the headers to the spec and to every same-origin ref document, including nested ones", async () => {
+      httpClient.get.mockImplementation(
+        serveDocuments({
+          "https://example.com/root.yaml": `openapi: "3.0.0"\npaths:\n  /jobs:\n    $ref: "./paths/jobs.yaml#/jobsPath"\n`,
+          "https://example.com/paths/jobs.yaml": `jobsPath:\n  get:\n    parameters:\n      - $ref: "../components/params.yaml#/JobId"\n`,
+          "https://example.com/components/params.yaml": `JobId:\n  name: job_id\n  in: query\n  schema:\n    type: string\n`,
+        })
+      );
 
-      if (source === "https://example.com/paths/jobs.yaml") {
-        return {
-          data: `jobsPath:\n  get:\n    summary: Get job\n`,
-        };
-      }
+      const profile: Profile = {
+        ...baseProfile,
+        openapiSpecSource: "https://example.com/root.yaml",
+      };
 
-      throw new Error(`Unexpected URL: ${source}`);
+      const fs = new MemoryFs();
+      const loader = new OpenapiLoader({ fs, httpClient });
+      const loaded = await loader.loadSpec(profile, { refresh: true, headers: profileHeaders }) as Record<string, any>;
+
+      expect(loaded.paths["/jobs"].get.parameters[0].name).toBe("job_id");
+      expect(httpClient.get).toHaveBeenCalledTimes(3);
+      expect(headersSentTo(httpClient, "https://example.com/root.yaml")).toEqual(profileHeaders);
+      expect(headersSentTo(httpClient, "https://example.com/paths/jobs.yaml")).toEqual(profileHeaders);
+      expect(headersSentTo(httpClient, "https://example.com/components/params.yaml")).toEqual(profileHeaders);
     });
+
+    it("does not send the headers to ref documents on another origin", async () => {
+      httpClient.get.mockImplementation(
+        serveDocuments({
+          "https://api.example.com/root.yaml": `openapi: "3.0.0"\npaths:\n  /pets:\n    get:\n      responses:\n        "200":\n          description: ok\n          content:\n            application/json:\n              schema:\n                $ref: "https://schemas.example.org/pet.yaml#/Pet"\n`,
+          "https://schemas.example.org/pet.yaml": `Pet:\n  type: object\n  properties:\n    id:\n      type: integer\n`,
+        })
+      );
+
+      const profile: Profile = {
+        ...baseProfile,
+        apiBaseUrl: "https://api.example.com",
+        openapiSpecSource: "https://api.example.com/root.yaml",
+      };
+
+      const fs = new MemoryFs();
+      const loader = new OpenapiLoader({ fs, httpClient });
+      const loaded = await loader.loadSpec(profile, { refresh: true, headers: profileHeaders }) as Record<string, any>;
+
+      expect(loaded.paths["/pets"].get.responses["200"].content["application/json"].schema.type).toBe("object");
+      expect(headersSentTo(httpClient, "https://api.example.com/root.yaml")).toEqual(profileHeaders);
+      expect(headersSentTo(httpClient, "https://schemas.example.org/pet.yaml")).toBeUndefined();
+    });
+
+    it("sends the headers to ref documents on the API base URL origin when the spec lives elsewhere", async () => {
+      httpClient.get.mockImplementation(
+        serveDocuments({
+          "https://docs.example.com/root.yaml": `openapi: "3.0.0"\npaths:\n  /pets:\n    $ref: "https://api.example.com/paths/pets.yaml#/petsPath"\n`,
+          "https://api.example.com/paths/pets.yaml": `petsPath:\n  get:\n    summary: List pets\n`,
+        })
+      );
+
+      const profile: Profile = {
+        ...baseProfile,
+        apiBaseUrl: "https://api.example.com/v1",
+        openapiSpecSource: "https://docs.example.com/root.yaml",
+      };
+
+      const fs = new MemoryFs();
+      const loader = new OpenapiLoader({ fs, httpClient });
+      const loaded = await loader.loadSpec(profile, { refresh: true, headers: profileHeaders }) as Record<string, any>;
+
+      expect(loaded.paths["/pets"].get.summary).toBe("List pets");
+      expect(headersSentTo(httpClient, "https://docs.example.com/root.yaml")).toEqual(profileHeaders);
+      expect(headersSentTo(httpClient, "https://api.example.com/paths/pets.yaml")).toEqual(profileHeaders);
+    });
+  });
+
+  it("wraps a failed download into SpecFetchError carrying the URL and HTTP status", async () => {
+    httpClient.get.mockRejectedValueOnce(
+      Object.assign(new Error("Request failed with status code 401"), { response: { status: 401 } })
+    );
 
     const profile: Profile = {
       ...baseProfile,
-      openapiSpecSource: "https://example.com/root.yaml",
+      openapiSpecSource: "https://api.example.com/openapi.json",
     };
 
     const fs = new MemoryFs();
-    const loader = new OpenapiLoader({ fs });
+    const loader = new OpenapiLoader({ fs, httpClient });
 
-    await loader.loadSpec(profile, {
-      refresh: true,
-      headers: { Authorization: "Bearer token123", "x-api-key": "key123" },
-    });
+    const failure = await loader.loadSpec(profile, { refresh: true }).catch((err: unknown) => err);
 
-    expect(mockedAxios.get).toHaveBeenCalledTimes(2);
-    for (const call of mockedAxios.get.mock.calls) {
-      expect(call[1]).toEqual({
-        responseType: "text",
-        headers: { Authorization: "Bearer token123", "x-api-key": "key123" },
-      });
-    }
+    expect(failure).toBeInstanceOf(SpecFetchError);
+    expect((failure as SpecFetchError).url).toBe("https://api.example.com/openapi.json");
+    expect((failure as SpecFetchError).status).toBe(401);
+    expect((failure as SpecFetchError).message).toContain("https://api.example.com/openapi.json");
+    expect((failure as SpecFetchError).message).toContain("401");
+    expect(fs.existsSync(profile.openapiSpecCache)).toBe(false);
   });
 });
