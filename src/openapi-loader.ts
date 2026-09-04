@@ -12,23 +12,66 @@ interface FileSystemForLoader {
   mkdirSync(pathToCreate: string, options?: { recursive?: boolean }): void;
 }
 
+export interface SpecHttpClient {
+  get(url: string, options?: { headers?: Record<string, string> }): Promise<{ data: unknown }>;
+}
+
 export interface OpenapiLoaderOptions {
   fs?: FileSystemForLoader;
+  httpClient?: SpecHttpClient;
 }
+
+export interface LoadSpecOptions {
+  refresh?: boolean;
+  headers?: Record<string, string>;
+}
+
+interface RemoteAuth {
+  headers: Record<string, string>;
+  origins: Set<string>;
+}
+
+interface ResolveContext {
+  currentSource: string;
+  currentDocument: unknown;
+  rawDocCache: Map<string, unknown>;
+  resolvingRefs: Set<string>;
+  remoteAuth?: RemoteAuth;
+}
+
+export class SpecFetchError extends Error {
+  readonly url: string;
+  readonly status?: number;
+
+  constructor(url: string, status: number | undefined, detail: string) {
+    super(
+      status === undefined
+        ? `Failed to fetch OpenAPI document ${url}: ${detail}`
+        : `Failed to fetch OpenAPI document ${url}: HTTP ${status}`
+    );
+    this.name = "SpecFetchError";
+    this.url = url;
+    this.status = status;
+  }
+}
+
+const defaultHttpClient: SpecHttpClient = {
+  get: async (url, options) => {
+    const response = await axios.get(url, { responseType: "text", headers: options?.headers });
+    return { data: response.data };
+  },
+};
 
 export class OpenapiLoader {
   private readonly fs: FileSystemForLoader;
+  private readonly httpClient: SpecHttpClient;
 
   constructor(options?: OpenapiLoaderOptions) {
     this.fs = options?.fs ?? fsModule;
+    this.httpClient = options?.httpClient ?? defaultHttpClient;
   }
 
-  async loadSpec(
-    profile: Profile,
-    options?: {
-      refresh?: boolean;
-    }
-  ): Promise<unknown> {
+  async loadSpec(profile: Profile, options?: LoadSpecOptions): Promise<unknown> {
     const cachePath = profile.openapiSpecCache;
 
     if (!options?.refresh && this.fs.existsSync(cachePath)) {
@@ -36,7 +79,7 @@ export class OpenapiLoader {
       return JSON.parse(cached);
     }
 
-    const spec = await this.loadAndResolveSpec(profile.openapiSpecSource);
+    const spec = await this.loadAndResolveSpec(profile.openapiSpecSource, this.remoteAuthFor(profile, options?.headers));
     this.ensureCacheDir(cachePath);
 
     const serialized = JSON.stringify(spec, null, 2);
@@ -45,20 +88,68 @@ export class OpenapiLoader {
     return spec;
   }
 
-  private async loadAndResolveSpec(source: string): Promise<unknown> {
+  private async loadAndResolveSpec(source: string, remoteAuth?: RemoteAuth): Promise<unknown> {
     const rawDocCache = new Map<string, unknown>();
-    const root = await this.loadDocument(source, rawDocCache);
+    const root = await this.loadDocument(source, rawDocCache, remoteAuth);
     return this.resolveRefs(root, {
       currentSource: source,
       currentDocument: root,
       rawDocCache,
       resolvingRefs: new Set<string>(),
+      remoteAuth,
     });
   }
 
-  private async loadFromSource(source: string): Promise<unknown> {
-    if (source.startsWith("http://") || source.startsWith("https://")) {
-      const response = await axios.get(source, { responseType: "text" });
+  // Profile credentials are meant for the hosts the user configured: the spec URL and the API base URL.
+  // Any other origin reachable through an external $ref is fetched anonymously.
+  private remoteAuthFor(profile: Profile, headers?: Record<string, string>): RemoteAuth | undefined {
+    if (!headers || Object.keys(headers).length === 0) {
+      return undefined;
+    }
+
+    const origins = new Set<string>();
+    for (const candidate of [profile.openapiSpecSource, profile.apiBaseUrl]) {
+      const origin = this.originOf(candidate);
+      if (origin) {
+        origins.add(origin);
+      }
+    }
+
+    return { headers, origins };
+  }
+
+  private headersFor(source: string, remoteAuth?: RemoteAuth): Record<string, string> | undefined {
+    if (!remoteAuth) {
+      return undefined;
+    }
+    const origin = this.originOf(source);
+    return origin && remoteAuth.origins.has(origin) ? remoteAuth.headers : undefined;
+  }
+
+  private originOf(source: string): string | undefined {
+    if (!this.isRemote(source)) {
+      return undefined;
+    }
+    try {
+      return new URL(source).origin;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private isRemote(source: string): boolean {
+    return source.startsWith("http://") || source.startsWith("https://");
+  }
+
+  private async loadFromSource(source: string, remoteAuth?: RemoteAuth): Promise<unknown> {
+    if (this.isRemote(source)) {
+      const headers = this.headersFor(source, remoteAuth);
+      let response: { data: unknown };
+      try {
+        response = await this.httpClient.get(source, headers ? { headers } : {});
+      } catch (err) {
+        throw this.toFetchError(source, err);
+      }
       return this.parseSpec(response.data, source);
     }
 
@@ -66,17 +157,26 @@ export class OpenapiLoader {
     return this.parseSpec(raw, source);
   }
 
-  private async loadDocument(source: string, rawDocCache: Map<string, unknown>): Promise<unknown> {
+  private toFetchError(url: string, err: unknown): SpecFetchError {
+    if (err instanceof SpecFetchError) {
+      return err;
+    }
+    const status = (err as { response?: { status?: unknown } } | undefined)?.response?.status;
+    const detail = err instanceof Error ? err.message : String(err);
+    return new SpecFetchError(url, typeof status === "number" ? status : undefined, detail);
+  }
+
+  private async loadDocument(source: string, rawDocCache: Map<string, unknown>, remoteAuth?: RemoteAuth): Promise<unknown> {
     if (rawDocCache.has(source)) {
       return rawDocCache.get(source);
     }
 
-    const loaded = await this.loadFromSource(source);
+    const loaded = await this.loadFromSource(source, remoteAuth);
     rawDocCache.set(source, loaded);
     return loaded;
   }
 
-  private parseSpec(content: string | object, source: string): unknown {
+  private parseSpec(content: unknown, source: string): unknown {
     if (typeof content !== "string") {
       return content;
     }
@@ -86,15 +186,7 @@ export class OpenapiLoader {
     return JSON.parse(content);
   }
 
-  private async resolveRefs(
-    value: unknown,
-    context: {
-      currentSource: string;
-      currentDocument: unknown;
-      rawDocCache: Map<string, unknown>;
-      resolvingRefs: Set<string>;
-    }
-  ): Promise<unknown> {
+  private async resolveRefs(value: unknown, context: ResolveContext): Promise<unknown> {
     if (Array.isArray(value)) {
       const items = await Promise.all(value.map((item) => this.resolveRefs(item, context)));
       return items;
@@ -132,15 +224,7 @@ export class OpenapiLoader {
     return Object.fromEntries(resolvedEntries);
   }
 
-  private async resolveRef(
-    ref: string,
-    context: {
-      currentSource: string;
-      currentDocument: unknown;
-      rawDocCache: Map<string, unknown>;
-      resolvingRefs: Set<string>;
-    }
-  ): Promise<unknown> {
+  private async resolveRef(ref: string, context: ResolveContext): Promise<unknown> {
     const { source, pointer } = this.splitRef(ref, context.currentSource);
     const cacheKey = `${source}#${pointer}`;
 
@@ -152,14 +236,13 @@ export class OpenapiLoader {
 
     const targetDocument = source === context.currentSource
       ? context.currentDocument
-      : await this.loadDocument(source, context.rawDocCache);
+      : await this.loadDocument(source, context.rawDocCache, context.remoteAuth);
 
     const targetValue = this.resolvePointer(targetDocument, pointer);
     const resolvedValue = await this.resolveRefs(targetValue, {
+      ...context,
       currentSource: source,
       currentDocument: targetDocument,
-      rawDocCache: context.rawDocCache,
-      resolvingRefs: context.resolvingRefs,
     });
 
     context.resolvingRefs.delete(cacheKey);
@@ -172,11 +255,11 @@ export class OpenapiLoader {
       return { source: currentSource, pointer };
     }
 
-    if (refSource.startsWith("http://") || refSource.startsWith("https://")) {
+    if (this.isRemote(refSource)) {
       return { source: refSource, pointer };
     }
 
-    if (currentSource.startsWith("http://") || currentSource.startsWith("https://")) {
+    if (this.isRemote(currentSource)) {
       return { source: new URL(refSource, currentSource).toString(), pointer };
     }
 

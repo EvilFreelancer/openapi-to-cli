@@ -6,7 +6,7 @@ import axios, { AxiosError, AxiosRequestConfig, AxiosResponse } from "axios";
 
 import { ConfigLocator } from "./config";
 import { ProfileStore, Profile } from "./profile-store";
-import { OpenapiLoader } from "./openapi-loader";
+import { OpenapiLoader, SpecFetchError } from "./openapi-loader";
 import { OpenapiToCommands, CliCommand, CliCommandOption } from "./openapi-to-commands";
 import { CommandSearch } from "./command-search";
 import { findUnknownFlags, formatUnknownFlagsError } from "./command-args";
@@ -114,7 +114,7 @@ async function runApiCommand(
   const { profileName: overrideName, remaining: commandArgs } = extractProfileFlag(args);
   const profile = resolveProfile(profileStore, cwd, overrideName);
 
-  const spec = await openapiLoader.loadSpec(profile);
+  const spec = await loadProfileSpec(openapiLoader, profile);
   const commands = openapiToCommands.buildCommands(spec, profile);
   const command = commands.find((cmd) => cmd.name === toolName);
 
@@ -345,7 +345,24 @@ function buildRequestUrl(profile: Profile, command: CliCommand, flags: Record<st
   return url;
 }
 
-function buildHeaders(profile: Profile, command: CliCommand, flags: Record<string, string>): Record<string, string> {
+async function loadProfileSpec(
+  openapiLoader: OpenapiLoader,
+  profile: Profile,
+  options?: { refresh?: boolean }
+): Promise<unknown> {
+  try {
+    return await openapiLoader.loadSpec(profile, { refresh: options?.refresh, headers: buildProfileAuthHeaders(profile) });
+  } catch (err) {
+    if (err instanceof SpecFetchError && (err.status === 401 || err.status === 403)) {
+      throw new Error(
+        `${err.message}. Check --api-basic-auth, --api-bearer-token, or --custom-headers of profile ${profile.name}.`
+      );
+    }
+    throw err;
+  }
+}
+
+function buildProfileAuthHeaders(profile: Profile): Record<string, string> {
   const headers: Record<string, string> = {};
 
   if (profile.customHeaders) {
@@ -358,6 +375,12 @@ function buildHeaders(profile: Profile, command: CliCommand, flags: Record<strin
   } else if (profile.apiBearerToken) {
     headers.Authorization = `Bearer ${profile.apiBearerToken}`;
   }
+
+  return headers;
+}
+
+function buildHeaders(profile: Profile, command: CliCommand, flags: Record<string, string>): Record<string, string> {
+  const headers = buildProfileAuthHeaders(profile);
 
   const cookiePairs: string[] = [];
   command.options
@@ -619,7 +642,7 @@ export async function run(argv: string[], options?: RunOptions): Promise<void> {
       customHeaders,
     };
 
-    await openapiLoader.loadSpec(profile, { refresh: true });
+    await loadProfileSpec(openapiLoader, profile, { refresh: true });
     profileStore.saveProfile(cwd, profile, { makeCurrent: true });
   };
 
@@ -630,13 +653,25 @@ export async function run(argv: string[], options?: RunOptions): Promise<void> {
         demandOption: true,
         description: "Base URL for API requests.",
       })
-      .option("openapi-spec", { type: "string", demandOption: true })
-      .option("api-basic-auth", { type: "string", default: "" })
-      .option("api-bearer-token", { type: "string", default: "" })
+      .option("openapi-spec", {
+        type: "string",
+        demandOption: true,
+        description: "URL or local path of the OpenAPI/Swagger document. Downloaded once and cached.",
+      })
+      .option("api-basic-auth", {
+        type: "string",
+        default: "",
+        description: "user:password for Basic auth. Sent with API requests and the spec download.",
+      })
+      .option("api-bearer-token", {
+        type: "string",
+        default: "",
+        description: "Bearer token. Sent with API requests and the spec download.",
+      })
       .option("include-endpoints", { type: "string", default: "" })
       .option("exclude-endpoints", { type: "string", default: "" })
       .option("command-prefix", { type: "string", default: "", description: "Prefix for command names (e.g. api_ -> api_messages)" })
-      .option("custom-headers", { type: "string", default: "", description: "Custom headers as JSON string, e.g. '{\"X-Tenant\":\"acme\"}'" });
+      .option("custom-headers", { type: "string", default: "", description: "Custom headers as JSON string, e.g. '{\"X-Tenant\":\"acme\"}'. Sent with API requests and the spec download." });
 
   const staticCommands = new Set(["onboard", "profiles", "use", "commands", "search", "help", "--help", "-h", "--version"]);
 
@@ -753,7 +788,7 @@ export async function run(argv: string[], options?: RunOptions): Promise<void> {
       async (args) => {
         const overrideName = args.profile as string | undefined;
         const profile = resolveProfile(profileStore, cwd, overrideName);
-        const spec = await openapiLoader.loadSpec(profile);
+        const spec = await loadProfileSpec(openapiLoader, profile);
         const commands = openapiToCommands.buildCommands(spec, profile);
         if (commands.length === 0) {
           stdout(`No commands available for profile ${profile.name}\n`);
