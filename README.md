@@ -63,6 +63,25 @@ ocli commands -p other --query "send message"
 
 `--profile` (short `-p`) overrides the profile selected by `ocli use` for this invocation only. It works for both dynamic API commands and `ocli commands`. Place it anywhere after the command name. When omitted, the profile set via `ocli use` is used (falling back to `default`).
 
+### Authentication and custom headers
+
+A profile stores up to three credentials, set with `ocli profiles add` (or `ocli onboard`):
+
+- `--api-bearer-token <token>` sends `Authorization: Bearer <token>`
+- `--api-basic-auth <user:password>` sends `Authorization: Basic <base64>`; when both are set, Basic wins
+- `--custom-headers '{"X-Tenant":"acme"}'` adds any extra headers
+
+`ocli` attaches these headers to every API request and to the download of the OpenAPI spec itself, so a spec served behind the same auth as the API (for example `/openapi.json` answering 401 to anonymous requests) loads with `ocli profiles add`. The headers are sent only to the two origins named in the profile, the `--openapi-spec` URL and the `--api-base-url`. External `$ref` documents on those origins receive them too, at any nesting depth; `$ref` documents on any other host are fetched anonymously, so a spec cannot forward your credentials to a third-party host. Specs loaded from a local file path involve no request.
+
+When the spec download is rejected with 401 or 403, `ocli` reports the failing URL and the status and points at the three flags above:
+
+```bash
+$ ocli profiles add myapi --api-base-url https://api.example.com --openapi-spec https://api.example.com/openapi.json
+Failed to fetch OpenAPI document https://api.example.com/openapi.json: HTTP 401. Check --api-basic-auth, --api-bearer-token, or --custom-headers of profile myapi.
+```
+
+The spec is downloaded once and cached under `.ocli/specs/<profile>.json`. Later invocations read the cache and do not contact the spec URL. Re-run `ocli profiles add` with the same profile name to refresh it.
+
 ### Strict flag validation
 
 `ocli` refuses to run a command with a flag the spec does not define, instead of dropping it from the request:
