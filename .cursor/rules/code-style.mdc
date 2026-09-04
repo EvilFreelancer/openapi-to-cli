@@ -1,6 +1,6 @@
 ---
 description: Code style for openapi-to-cli (TypeScript)
-globs: "**/*.ts"
+globs: **/*.ts
 alwaysApply: true
 ---
 

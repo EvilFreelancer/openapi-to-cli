@@ -1,6 +1,6 @@
 ---
 description: Implementation order for openapi-to-cli (one unit at a time)
-globs: "src/**/*.ts"
+globs: src/**/*.ts
 alwaysApply: false
 ---
 

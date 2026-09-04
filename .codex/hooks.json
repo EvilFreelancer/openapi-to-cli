@@ -1,0 +1,33 @@
+{
+  "description": "Deterministic delivery of .cursor/rules/*.mdc to Codex sessions.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$(git rev-parse --show-toplevel)/.codex/hooks/attach_rules.py\"",
+            "statusMessage": "Loading always-on project rules",
+            "timeout": 10,
+            "additionalContextLimit": 8000
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "^(apply_patch|Edit|Write)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$(git rev-parse --show-toplevel)/.codex/hooks/attach_rules.py\"",
+            "statusMessage": "Attaching rules for edited files",
+            "timeout": 10,
+            "additionalContextLimit": 6000
+          }
+        ]
+      }
+    ]
+  }
+}

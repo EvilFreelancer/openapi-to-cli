@@ -1,6 +1,6 @@
 ---
 description: Test conventions for openapi-to-cli (Jest)
-globs: "tests/**/*.ts"
+globs: tests/**/*.ts
 alwaysApply: true
 ---
 
