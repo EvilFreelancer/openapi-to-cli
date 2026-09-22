@@ -65,7 +65,7 @@ ocli commands -p other --query "send message"
 
 ### OpenRPC and JSON-RPC APIs
 
-`ocli` also accepts OpenRPC JSON or YAML documents through the existing `--openapi-spec` option. It creates one command for each documented RPC method and exposes named RPC parameters as command flags.
+`ocli` also accepts OpenRPC JSON or YAML documents through the existing `--openapi-spec` option. It creates one command for each documented RPC method and exposes documented RPC parameters as command flags.
 
 ```bash
 ocli profiles add widgets \
@@ -91,6 +91,22 @@ OpenRPC commands always send an HTTP `POST` request with `Content-Type: applicat
 ```
 
 The profile's `--api-base-url` remains the request target. If it is empty, `ocli` falls back to the first server URL in the OpenRPC document.
+
+`ocli` serializes parameters from their documented schemas. Integers, numbers, and booleans are sent as JSON scalars. Arrays and objects must be supplied as JSON values. For methods with `paramStructure: "by-position"`, the same flags are emitted as a JSON array in the documented parameter order. Named and `either` methods use a JSON object.
+
+OpenRPC method names must be unique. `ocli` rejects an OpenRPC document that declares the same method name more than once instead of creating ambiguous CLI commands.
+
+For an OpenRPC profile, endpoint filters select RPC method names with the `rpc:` prefix:
+
+```bash
+ocli profiles add widgets \
+  --api-base-url https://api.example.com/rpc \
+  --openapi-spec ./openrpc.json \
+  --include-endpoints "rpc:getWidget,rpc:listWidgets" \
+  --exclude-endpoints "rpc:deleteWidget"
+```
+
+REST filter keys such as `get:/widgets` apply only to OpenAPI and Swagger operations.
 
 ### Authentication and custom headers
 
@@ -143,7 +159,7 @@ npx openapi-to-cli onboard \
 - path-level parameters inherited by operations
 - local `$ref` references for parameters and request bodies
 - header and cookie parameters in generated commands
-- OpenRPC methods with named parameters, including local schema references
+- OpenRPC methods with named or positional parameters, schema-typed values, local schema references, and method filters
 
 In practice this improves compatibility with APIs that define inputs outside simple path/query parameters, especially for `POST`, `PUT`, and `PATCH` operations.
 

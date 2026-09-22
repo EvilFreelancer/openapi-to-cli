@@ -141,7 +141,7 @@ async function runApiCommand(
     command.options.forEach((opt: CliCommandOption) => {
       const key = `--${opt.name}`;
       const requiredLabel = opt.required ? "required" : "";
-      const baseType = opt.schemaType;
+      const baseType = opt.schemaType?.split(":", 1)[0];
       let typeLabel = "string";
       if (baseType === "integer" || baseType === "number") {
         typeLabel = "number";
@@ -275,6 +275,74 @@ function parseBodyFlagValue(value: string): unknown {
   }
 
   return value;
+}
+
+function parseJsonRpcParameterValue(option: CliCommandOption, rawValue: string): unknown {
+  const parsedValue = parseBodyFlagValue(rawValue);
+  const schemaType = option.schemaType?.split(":", 1)[0];
+
+  if (parsedValue === null) {
+    if (option.nullable) {
+      return null;
+    }
+    throw new Error(`--${option.name} does not accept null`);
+  }
+
+  if (schemaType === "integer" || schemaType === "number") {
+    const numericValue = Number(rawValue);
+    const validNumber = rawValue.trim().length > 0 && Number.isFinite(numericValue);
+    if (!validNumber || (schemaType === "integer" && !Number.isInteger(numericValue))) {
+      throw new Error(`--${option.name} expects an ${schemaType}`);
+    }
+    return numericValue;
+  }
+
+  if (schemaType === "boolean") {
+    if (typeof parsedValue !== "boolean") {
+      throw new Error(`--${option.name} expects a boolean`);
+    }
+    return parsedValue;
+  }
+
+  if (schemaType === "array") {
+    if (!Array.isArray(parsedValue)) {
+      throw new Error(`--${option.name} expects a JSON array`);
+    }
+    return parsedValue;
+  }
+
+  if (schemaType === "object") {
+    if (typeof parsedValue !== "object" || Array.isArray(parsedValue)) {
+      throw new Error(`--${option.name} expects a JSON object`);
+    }
+    return parsedValue;
+  }
+
+  return parsedValue;
+}
+
+function buildJsonRpcPositionalParams(
+  bodyOptions: CliCommandOption[],
+  flags: Record<string, string>
+): unknown[] {
+  const params: unknown[] = [];
+  let omittedOption: string | undefined;
+
+  for (const option of bodyOptions) {
+    const value = flags[option.name];
+    if (value === undefined) {
+      omittedOption ??= option.name;
+      continue;
+    }
+    if (omittedOption) {
+      throw new Error(
+        `Cannot provide --${option.name} after omitting --${omittedOption} for positional JSON-RPC params`
+      );
+    }
+    params.push(parseJsonRpcParameterValue(option, value));
+  }
+
+  return params;
 }
 
 function parseArgs(args: string[]): { flags: Record<string, string>; positional: string[] } {
@@ -421,12 +489,14 @@ function buildRequestPayload(
     .map(([key, value]) => [key, parseBodyFlagValue(value)] as const);
 
   if (command.jsonRpcMethod) {
-    const params = Object.fromEntries([
-      ...bodyOptions
-        .filter((opt) => flags[opt.name] !== undefined)
-        .map((opt) => [opt.name, parseBodyFlagValue(flags[opt.name])] as const),
-      ...extraBodyEntries,
-    ]);
+    const params = command.jsonRpcParamStructure === "by-position"
+      ? buildJsonRpcPositionalParams(bodyOptions, flags)
+      : Object.fromEntries([
+        ...bodyOptions
+          .filter((opt) => flags[opt.name] !== undefined)
+          .map((opt) => [opt.name, parseJsonRpcParameterValue(opt, flags[opt.name])] as const),
+        ...extraBodyEntries,
+      ]);
     return {
       data: {
         jsonrpc: "2.0",

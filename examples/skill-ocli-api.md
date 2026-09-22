@@ -74,7 +74,7 @@ ocli commands -p github --query "list pull requests"
 
 ## OpenRPC APIs
 
-`ocli` accepts OpenRPC JSON or YAML documents through `--openapi-spec` too. It creates one command per RPC method and automatically sends a JSON-RPC 2.0 envelope. Pass documented named RPC parameters as regular flags:
+`ocli` accepts OpenRPC JSON or YAML documents through `--openapi-spec` too. It creates one command per RPC method and automatically sends a JSON-RPC 2.0 envelope. Pass documented RPC parameters as regular flags:
 
 ```bash
 ocli profiles add widgets \
@@ -84,6 +84,10 @@ ocli profiles add widgets \
 ocli getWidget --widgetId widget-7
 ```
 
+`ocli` serializes integer, number, and boolean values from their documented schemas. Use JSON syntax for array and object flags. It also follows `paramStructure: "by-position"` by sending flags in documented order as a JSON-RPC parameter array.
+
+For OpenRPC profiles, filter methods with `rpc:<method>` values, for example `--include-endpoints "rpc:getWidget"`. Method names must be unique in the document.
+
 ## Tips
 
 - All responses are JSON — pipe through `jq` for filtering
@@ -92,5 +96,5 @@ ocli getWidget --widgetId widget-7
 - Undeclared flags are rejected with `Unknown option: --x`, so copy names exactly from `--help` (including a leading `$`)
 - Use `ocli commands` to list all available commands
 - Use `--profile <name>` (or `-p <name>`) to switch profile for a single call without running `ocli use`
-- For OpenRPC, pass documented RPC parameters as flags. `ocli` adds `jsonrpc`, `method`, and `id` to the request body.
+- For OpenRPC, pass documented RPC parameters as flags. `ocli` adds `jsonrpc`, `method`, and `id` to the request body and uses the method's documented parameter structure.
 ````

@@ -45,6 +45,35 @@ class MemoryFs {
   }
 }
 
+async function captureRequest(spec: object, args: string[]): Promise<unknown[]> {
+  const cwd = "/project";
+  const homeDir = "/home/user";
+  const specCache = `${cwd}/.ocli/specs/rpc.json`;
+  const fs = new MemoryFs({
+    [`${cwd}/.ocli/current`]: "rpc",
+    [`${cwd}/.ocli/profiles.ini`]: [
+      "[rpc]",
+      "api_base_url = https://profile.example.test/rpc",
+      `openapi_spec_cache = ${specCache}`,
+      "",
+    ].join("\n"),
+    [specCache]: JSON.stringify(spec),
+  });
+  const locator = new ConfigLocator({ fs, homeDir });
+  const profileStore = new ProfileStore({ fs, locator });
+  const openapiLoader = new OpenapiLoader({ fs });
+  const capturedConfigs: unknown[] = [];
+  const httpClient: HttpClient = {
+    request: async (config) => {
+      capturedConfigs.push(config);
+      return { data: { jsonrpc: "2.0", result: {}, id: 1 } } as never;
+    },
+  };
+
+  await run(args, { cwd, profileStore, openapiLoader, httpClient, stdout: () => {} });
+  return capturedConfigs;
+}
+
 describe("cli with OpenRPC", () => {
   it("sends documented parameters in a JSON-RPC request envelope", async () => {
     const cwd = "/project";
@@ -106,5 +135,93 @@ describe("cli with OpenRPC", () => {
         },
       }),
     ]);
+  });
+
+  it("serializes documented scalar and structured parameter types", async () => {
+    const spec = {
+      openrpc: "1.0.0",
+      info: { title: "Example", version: "1.0.0" },
+      methods: [
+        {
+          name: "updateWidget",
+          params: [
+            { name: "count", required: true, schema: { type: "integer", format: "int64" } },
+            { name: "ratio", required: true, schema: { type: "number" } },
+            { name: "enabled", required: true, schema: { type: "boolean" } },
+            { name: "tags", required: true, schema: { type: "array", items: { type: "string" } } },
+          ],
+        },
+      ],
+    };
+
+    const capturedConfigs = await captureRequest(spec, [
+      "updateWidget",
+      "--count", "2",
+      "--ratio", "1.5",
+      "--enabled", "false",
+      "--tags", '["one","two"]',
+    ]);
+
+    expect(capturedConfigs).toEqual([
+      expect.objectContaining({
+        data: expect.objectContaining({
+          params: {
+            count: 2,
+            ratio: 1.5,
+            enabled: false,
+            tags: ["one", "two"],
+          },
+        }),
+      }),
+    ]);
+  });
+
+  it("serializes positional parameters as a JSON-RPC array", async () => {
+    const spec = {
+      openrpc: "1.0.0",
+      info: { title: "Example", version: "1.0.0" },
+      methods: [
+        {
+          name: "moveWidget",
+          paramStructure: "by-position",
+          params: [
+            { name: "widgetId", required: true, schema: { type: "string" } },
+            { name: "revision", required: true, schema: { type: "integer" } },
+          ],
+        },
+      ],
+    };
+
+    const capturedConfigs = await captureRequest(spec, [
+      "moveWidget",
+      "--widgetId", "widget-7",
+      "--revision", "3",
+    ]);
+
+    expect(capturedConfigs).toEqual([
+      expect.objectContaining({
+        data: expect.objectContaining({
+          params: ["widget-7", 3],
+        }),
+      }),
+    ]);
+  });
+
+  it("rejects invalid values for documented integer parameters", async () => {
+    const spec = {
+      openrpc: "1.0.0",
+      info: { title: "Example", version: "1.0.0" },
+      methods: [
+        {
+          name: "moveWidget",
+          params: [
+            { name: "revision", required: true, schema: { type: "integer" } },
+          ],
+        },
+      ],
+    };
+
+    await expect(captureRequest(spec, ["moveWidget", "--revision", "1.5"]))
+      .rejects.toThrow("--revision expects an integer");
   });
 });
