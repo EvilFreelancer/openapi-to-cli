@@ -43,4 +43,60 @@ describe("OpenapiToCommands with OpenRPC", () => {
       }),
     ]);
   });
+
+  it("applies RPC filters and preserves parameter and positional metadata", () => {
+    const spec: OpenapiSpecLike = {
+      openrpc: "1.0.0",
+      info: { title: "Example RPC API", version: "1.0.0" },
+      methods: [
+        {
+          name: "getWidget",
+          params: [],
+        },
+        {
+          name: "moveWidget",
+          paramStructure: "by-position",
+          params: [
+            {
+              name: "widgetId",
+              summary: "Widget identifier",
+              required: true,
+              schema: { type: "string" },
+            },
+          ],
+        },
+      ],
+    };
+    const profile: Profile = {
+      ...baseProfile,
+      includeEndpoints: ["rpc:getWidget", "rpc:moveWidget"],
+      excludeEndpoints: ["rpc:getWidget"],
+    };
+
+    const commands = new OpenapiToCommands().buildCommands(spec, profile);
+
+    expect(commands).toHaveLength(1);
+    expect(commands[0]).toEqual(expect.objectContaining({
+      name: "moveWidget",
+      jsonRpcParamStructure: "by-position",
+      options: [expect.objectContaining({
+        name: "widgetId",
+        description: "Widget identifier",
+      })],
+    }));
+  });
+
+  it("rejects duplicate OpenRPC method names", () => {
+    const spec: OpenapiSpecLike = {
+      openrpc: "1.0.0",
+      info: { title: "Example RPC API", version: "1.0.0" },
+      methods: [
+        { name: "getWidget", params: [] },
+        { name: "getWidget", params: [] },
+      ],
+    };
+
+    expect(() => new OpenapiToCommands().buildCommands(spec, baseProfile))
+      .toThrow('Duplicate OpenRPC method name "getWidget"');
+  });
 });

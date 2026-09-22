@@ -1,11 +1,12 @@
-name: Tag release on merge
+name: Tag release on main push
 
 on:
-  pull_request:
-    types: [closed]
-    branches:
-      - main
+  push:
+    branches: [main]
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 defaults:
   run:
@@ -15,17 +16,13 @@ jobs:
   tag-version:
     name: Bump and push version tag
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
-    permissions:
-      contents: write
-      actions: write
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.event_name == 'workflow_dispatch' && github.ref || github.event.pull_request.merge_commit_sha }}
+          ref: ${{ github.sha }}
 
       - name: Fetch all tags
         run: git fetch --tags

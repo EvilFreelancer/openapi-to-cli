@@ -1,6 +1,7 @@
 import { Profile } from "./profile-store";
 
 export type ParameterLocation = "path" | "query" | "header" | "cookie" | "body" | "formData";
+export type JsonRpcParamStructure = "by-name" | "by-position" | "either";
 
 export interface CliCommandOption {
   name: string;
@@ -27,6 +28,7 @@ export interface CliCommand {
   serverUrl?: string;
   serverUrlOverridesProfile?: boolean;
   jsonRpcMethod?: string;
+  jsonRpcParamStructure?: JsonRpcParamStructure;
 }
 
 type HttpMethod = "get" | "post" | "put" | "delete" | "patch" | "head" | "options" | "trace";
@@ -91,11 +93,13 @@ interface OpenRpcMethodLike {
   name?: string;
   summary?: string;
   description?: string;
+  paramStructure?: string;
   params?: unknown[];
 }
 
 interface OpenRpcParameterLike {
   name?: string;
+  summary?: string;
   description?: string;
   required?: boolean;
   schema?: SchemaLike;
@@ -143,12 +147,17 @@ export class OpenapiToCommands {
     const serverUrl = this.resolveServers(spec.servers);
     const methods = spec.methods as OpenRpcMethodLike[];
     const commands: CliCommand[] = [];
+    const methodNames = new Set<string>();
 
     for (const rawMethod of methods) {
       const method = this.resolveValue(rawMethod, spec) as OpenRpcMethodLike;
       if (!method.name) {
         continue;
       }
+      if (methodNames.has(method.name)) {
+        throw new Error(`Duplicate OpenRPC method name "${method.name}"`);
+      }
+      methodNames.add(method.name);
 
       const options = (method.params ?? [])
         .map((rawParameter) => this.resolveValue(rawParameter, spec) as OpenRpcParameterLike)
@@ -160,7 +169,7 @@ export class OpenapiToCommands {
             location: "body" as const,
             required: Boolean(parameter.required),
             schemaType: this.describeSchemaType(schema),
-            description: parameter.description,
+            description: parameter.summary ?? parameter.description,
             ...this.extractSchemaHints(schema),
           };
         });
@@ -175,16 +184,26 @@ export class OpenapiToCommands {
         serverUrl,
         serverUrlOverridesProfile: false,
         jsonRpcMethod: method.name,
+        jsonRpcParamStructure: this.resolveJsonRpcParamStructure(method.paramStructure),
       });
     }
 
+    const filteredCommands = this.applyOpenRpcFilters(commands, profile);
+
     if (profile.commandPrefix) {
-      for (const command of commands) {
+      for (const command of filteredCommands) {
         command.name = `${profile.commandPrefix}${command.name}`;
       }
     }
 
-    return commands;
+    return filteredCommands;
+  }
+
+  private resolveJsonRpcParamStructure(paramStructure: string | undefined): JsonRpcParamStructure {
+    if (paramStructure === "by-name" || paramStructure === "by-position" || paramStructure === "either") {
+      return paramStructure;
+    }
+    return "either";
   }
 
   private collectOperations(spec: OpenapiSpecLike): PathOperation[] {
@@ -233,6 +252,22 @@ export class OpenapiToCommands {
       }
 
       return includeSet.has(key);
+    });
+  }
+
+  private applyOpenRpcFilters(commands: CliCommand[], profile: Profile): CliCommand[] {
+    const include = profile.includeEndpoints;
+    const exclude = new Set(profile.excludeEndpoints);
+    const includeSet = new Set(include);
+
+    return commands.filter((command) => {
+      const key = `rpc:${command.jsonRpcMethod}`;
+
+      if (exclude.has(key)) {
+        return false;
+      }
+
+      return include.length === 0 || includeSet.has(key);
     });
   }
 

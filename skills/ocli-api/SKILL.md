@@ -33,7 +33,7 @@ ocli profiles add <name> \
 ocli use <name>
 ```
 
-For OpenRPC, use the same profile command. `ocli` builds one command per RPC method and wraps documented named parameters in a JSON-RPC 2.0 request automatically:
+For OpenRPC, use the same profile command. `ocli` builds one command per RPC method and wraps documented parameters in a JSON-RPC 2.0 request automatically:
 
 ```bash
 ocli profiles add rpc-api \
@@ -42,6 +42,10 @@ ocli profiles add rpc-api \
 
 ocli getWidget --widgetId widget-7
 ```
+
+`ocli` serializes integer, number, and boolean values according to the method schema. Pass arrays and objects as JSON. It follows `paramStructure: "by-position"` by sending the documented flags as a JSON-RPC parameter array in order. Named and `either` methods receive a JSON object.
+
+For OpenRPC profiles, use `rpc:<method>` selectors with `--include-endpoints` or `--exclude-endpoints`, for example `rpc:getWidget`. OpenRPC method names must be unique.
 
 ## Workflow
 
@@ -87,7 +91,7 @@ ocli repos_get --profile github --owner octocat --repo Hello-World
 - Always search before guessing a command name.
 - Always check `--help` before calling a command you haven't used before.
 - Never fabricate parameter names — use the ones from `--help` output.
-- For OpenRPC, pass only documented RPC parameters. Do not add `jsonrpc`, `method`, or `id`; `ocli` supplies them.
+- For OpenRPC, pass only documented RPC parameters. Do not add `jsonrpc`, `method`, or `id`; `ocli` supplies them and follows the documented parameter structure.
 - If a command returns an error, read the response body before retrying.
 
 ## Failure handling
