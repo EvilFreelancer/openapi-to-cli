@@ -72,6 +72,18 @@ ocli repos_get --profile github --owner octocat --repo Hello-World
 ocli commands -p github --query "list pull requests"
 ```
 
+## OpenRPC APIs
+
+`ocli` accepts OpenRPC JSON or YAML documents through `--openapi-spec` too. It creates one command per RPC method and automatically sends a JSON-RPC 2.0 envelope. Pass documented named RPC parameters as regular flags:
+
+```bash
+ocli profiles add widgets \
+  --api-base-url https://api.example.com/rpc \
+  --openapi-spec ./openrpc.json
+
+ocli getWidget --widgetId widget-7
+```
+
 ## Tips
 
 - All responses are JSON — pipe through `jq` for filtering
@@ -80,4 +92,5 @@ ocli commands -p github --query "list pull requests"
 - Undeclared flags are rejected with `Unknown option: --x`, so copy names exactly from `--help` (including a leading `$`)
 - Use `ocli commands` to list all available commands
 - Use `--profile <name>` (or `-p <name>`) to switch profile for a single call without running `ocli use`
+- For OpenRPC, pass documented RPC parameters as flags. `ocli` adds `jsonrpc`, `method`, and `id` to the request body.
 ````

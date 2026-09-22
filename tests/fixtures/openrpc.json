@@ -1,0 +1,41 @@
+{
+  "openrpc": "1.0.0-rc1",
+  "info": {
+    "title": "Example RPC API",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "name": "example",
+      "url": "https://api.example.test/rpc"
+    }
+  ],
+  "methods": [
+    {
+      "name": "getWidget",
+      "description": "Get one widget",
+      "params": [
+        {
+          "name": "widgetId",
+          "description": "Widget identifier",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/Integer"
+          }
+        }
+      ]
+    },
+    {
+      "name": "listWidgets",
+      "description": "List widgets",
+      "params": []
+    }
+  ],
+  "components": {
+    "schemas": {
+      "Integer": {
+        "type": "integer"
+      }
+    }
+  }
+}

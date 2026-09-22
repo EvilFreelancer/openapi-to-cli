@@ -420,6 +420,24 @@ function buildRequestPayload(
     .filter(([key]) => !knownOptionNames.has(key))
     .map(([key, value]) => [key, parseBodyFlagValue(value)] as const);
 
+  if (command.jsonRpcMethod) {
+    const params = Object.fromEntries([
+      ...bodyOptions
+        .filter((opt) => flags[opt.name] !== undefined)
+        .map((opt) => [opt.name, parseBodyFlagValue(flags[opt.name])] as const),
+      ...extraBodyEntries,
+    ]);
+    return {
+      data: {
+        jsonrpc: "2.0",
+        method: command.jsonRpcMethod,
+        params,
+        id: 1,
+      },
+      contentType: "application/json",
+    };
+  }
+
   if (bodyOptions.length === 1 && bodyOptions[0].name === "body" && flags.body !== undefined) {
     return {
       data: parseBodyFlagValue(flags.body),
