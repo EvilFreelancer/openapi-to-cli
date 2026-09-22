@@ -1,6 +1,6 @@
 ## OpenAPI to CLI (ocli)
 
-`openapi-to-cli` (short `ocli`) is a TypeScript CLI that turns any HTTP API described by an OpenAPI/Swagger spec into a set of CLI commands — at runtime, without code generation.
+`openapi-to-cli` (short `ocli`) is a TypeScript CLI that turns any HTTP API described by an OpenAPI, Swagger, or OpenRPC spec into a set of CLI commands — at runtime, without code generation.
 
 ```bash
 npm install -g openapi-to-cli
@@ -63,6 +63,35 @@ ocli commands -p other --query "send message"
 
 `--profile` (short `-p`) overrides the profile selected by `ocli use` for this invocation only. It works for both dynamic API commands and `ocli commands`. Place it anywhere after the command name. When omitted, the profile set via `ocli use` is used (falling back to `default`).
 
+### OpenRPC and JSON-RPC APIs
+
+`ocli` also accepts OpenRPC JSON or YAML documents through the existing `--openapi-spec` option. It creates one command for each documented RPC method and exposes named RPC parameters as command flags.
+
+```bash
+ocli profiles add widgets \
+  --api-base-url https://api.example.com/rpc \
+  --openapi-spec ./openrpc.json \
+  --api-bearer-token "$TOKEN"
+
+ocli use widgets
+ocli getWidget --widgetId widget-7
+```
+
+OpenRPC commands always send an HTTP `POST` request with `Content-Type: application/json`. `ocli` builds the JSON-RPC 2.0 envelope automatically:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "getWidget",
+  "params": {
+    "widgetId": "widget-7"
+  },
+  "id": 1
+}
+```
+
+The profile's `--api-base-url` remains the request target. If it is empty, `ocli` falls back to the first server URL in the OpenRPC document.
+
 ### Authentication and custom headers
 
 A profile stores up to three credentials, set with `ocli profiles add` (or `ocli onboard`):
@@ -107,13 +136,14 @@ npx openapi-to-cli onboard \
 
 ### Broader spec support
 
-`ocli` now handles a wider range of real-world OpenAPI and Swagger documents:
+`ocli` now handles a wider range of real-world API descriptions:
 
 - OAS 3 `requestBody` for JSON payloads
 - Swagger 2 `body` and `formData` parameters
 - path-level parameters inherited by operations
 - local `$ref` references for parameters and request bodies
 - header and cookie parameters in generated commands
+- OpenRPC methods with named parameters, including local schema references
 
 In practice this improves compatibility with APIs that define inputs outside simple path/query parameters, especially for `POST`, `PUT`, and `PATCH` operations.
 
@@ -222,6 +252,7 @@ Note: MCP+Search Compact (search → get_schema → call) is the fairest compari
 | Regex command search | ✅ | ❌ | ❌ | ❌ |
 | Per-profile endpoint filtering | ✅ | ✅ | ❌ | ❌ |
 | OpenAPI/Swagger (JSON + YAML) | ✅ | ✅ | ✅ | ❌ |
+| OpenRPC (JSON + YAML) | ✅ | ? | ? | ? |
 | MCP server support | ❌ | ✅ (HTTP/SSE/stdio) | ❌ | ❌ |
 | GraphQL support | ❌ | ✅ (introspection) | ❌ | ❌ |
 | Spec caching | ✅ | ✅ (1h TTL) | ❌ | ❌ |

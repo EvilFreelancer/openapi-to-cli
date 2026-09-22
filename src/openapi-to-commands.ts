@@ -26,6 +26,7 @@ export interface CliCommand {
   requestContentType?: string;
   serverUrl?: string;
   serverUrlOverridesProfile?: boolean;
+  jsonRpcMethod?: string;
 }
 
 type HttpMethod = "get" | "post" | "put" | "delete" | "patch" | "head" | "options" | "trace";
@@ -86,8 +87,26 @@ interface ServerLike {
   variables?: Record<string, { default?: string }>;
 }
 
+interface OpenRpcMethodLike {
+  name?: string;
+  summary?: string;
+  description?: string;
+  params?: unknown[];
+}
+
+interface OpenRpcParameterLike {
+  name?: string;
+  description?: string;
+  required?: boolean;
+  schema?: SchemaLike;
+}
+
 export class OpenapiToCommands {
   buildCommands(spec: OpenapiSpecLike, profile: Profile): CliCommand[] {
+    if (this.isOpenRpcSpec(spec)) {
+      return this.buildOpenRpcCommands(spec, profile);
+    }
+
     const operations = this.collectOperations(spec);
     const methodsByPath: Record<string, Set<HttpMethod>> = {};
 
@@ -105,6 +124,63 @@ export class OpenapiToCommands {
     if (prefix) {
       for (const cmd of commands) {
         cmd.name = `${prefix}${cmd.name}`;
+      }
+    }
+
+    return commands;
+  }
+
+  private isOpenRpcSpec(spec: OpenapiSpecLike): boolean {
+    return Boolean(
+      spec &&
+      typeof spec === "object" &&
+      typeof spec.openrpc === "string" &&
+      Array.isArray(spec.methods)
+    );
+  }
+
+  private buildOpenRpcCommands(spec: OpenapiSpecLike, profile: Profile): CliCommand[] {
+    const serverUrl = this.resolveServers(spec.servers);
+    const methods = spec.methods as OpenRpcMethodLike[];
+    const commands: CliCommand[] = [];
+
+    for (const rawMethod of methods) {
+      const method = this.resolveValue(rawMethod, spec) as OpenRpcMethodLike;
+      if (!method.name) {
+        continue;
+      }
+
+      const options = (method.params ?? [])
+        .map((rawParameter) => this.resolveValue(rawParameter, spec) as OpenRpcParameterLike)
+        .filter((parameter) => Boolean(parameter.name))
+        .map((parameter) => {
+          const schema = this.resolveSchema(parameter.schema, spec);
+          return {
+            name: parameter.name as string,
+            location: "body" as const,
+            required: Boolean(parameter.required),
+            schemaType: this.describeSchemaType(schema),
+            description: parameter.description,
+            ...this.extractSchemaHints(schema),
+          };
+        });
+
+      commands.push({
+        name: method.name,
+        method: "post",
+        path: "",
+        options,
+        description: method.summary ?? method.description,
+        requestContentType: "application/json",
+        serverUrl,
+        serverUrlOverridesProfile: false,
+        jsonRpcMethod: method.name,
+      });
+    }
+
+    if (profile.commandPrefix) {
+      for (const command of commands) {
+        command.name = `${profile.commandPrefix}${command.name}`;
       }
     }
 
